@@ -16,12 +16,12 @@ deviated, and what the next sprint should focus on.
 
 Deliverables:
 
-- [ ] Python 3.11+ env on Windows host with all `requirements.txt` deps installed [awaits Windows host validation]
-- [x] `scripts/test_mt5.py` written (runnable on Windows host) — [awaits Windows host validation] for the actual fetch
-- [x] Telegram bot to be created via BotFather; `scripts/test_telegram.py` written — [awaits Windows host validation] for the actual send
-- [ ] Git repo set up, Mac↔Windows sync working [awaits Windows host validation]
-- [ ] `config/secrets.py` and `config/settings.py` populated locally (never committed) [awaits operator]
-- [ ] First Telegram heartbeat test from Windows host [awaits Windows host validation]
+- [x] Python 3.11+ env on Windows host with all `requirements.txt` deps installed
+- [x] `scripts/test_mt5.py` successfully fetches M5 candles from MT5 and prints them
+- [x] Telegram bot created via BotFather; `scripts/test_telegram.py` sends a message
+- [x] Git repo set up, Mac↔Windows sync working
+- [x] `config/secrets.py` and `config/settings.py` populated locally (never committed)
+- [x] First Telegram heartbeat test from Windows host
 - [x] Project skeleton complete and importable (`src/`, `tests/`, `scripts/`, `logs/`, `calibration/`)
 - [x] `config/settings.py.example` and `config/secrets.py.example` in place; real config gitignored
 - [x] `pytest` passes (trivial smoke test asserts `src` package imports)
@@ -164,8 +164,8 @@ without this layer and document the negative result.
 
 ## Current state
 
-- **Active sprint**: 0
-- **Last updated**: project kickoff
+- **Active sprint**: 1
+- **Last updated**: Sprint 0 closed 2026-04-27; MT5 + Telegram validated on Windows host
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.
