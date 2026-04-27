@@ -76,7 +76,8 @@ visual reading on a reference set of charts. See
 
 A **swing high** is a candle whose `high` is strictly greater than the `high`
 of the `N` candles immediately before AND the `N` candles immediately after
-it (N = `SWING_LOOKBACK`, default 2).
+it (N = `SWING_LOOKBACK_H4` / `SWING_LOOKBACK_H1` / `SWING_LOOKBACK_M5`
+depending on timeframe, default 2 each — see `config/settings.py.example`).
 
 A **swing low** is the symmetric definition.
 

@@ -141,6 +141,140 @@ here, then to the strategy doc, then to the detection philosophy doc.
 
 ---
 
+## Configuration reference
+
+Authoritative cross-reference of every key in `config/settings.py` (and
+`config/secrets.py`). Names below are the **canonical names**; any code,
+test, or doc that mentions a config key must use these names verbatim.
+If a key is renamed, update this table first, then code, then docs.
+
+### Timezones (`zoneinfo.ZoneInfo`)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `TZ_PARIS` | `ZoneInfo` | `Europe/Paris` — operator's local time, used for session boundaries and display. |
+| `TZ_UTC` | `ZoneInfo` | `UTC` — internal storage timezone. All datetimes inside the system are UTC. |
+| `TZ_NY` | `ZoneInfo` | `America/New_York` — convenience for NY-session displays. |
+
+### Watched instruments
+
+| Key | Type | Meaning |
+|---|---|---|
+| `WATCHED_PAIRS` | `list[str]` | Symbols scanned each cycle. Names must match those exposed by the MT5 terminal. |
+
+### Sessions (Paris time tuples `(start_hour, start_min, end_hour, end_min)`)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `SESSION_ASIA` | `tuple[int, int, int, int]` | Asian range used for liquidity marking (accumulation). |
+| `KILLZONE_LONDON` | `tuple[int, int, int, int]` | London killzone — first scan window. |
+| `KILLZONE_NY` | `tuple[int, int, int, int]` | NY killzone — second scan window. |
+
+### Swings (calibrated)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `SWING_LOOKBACK_H4` | `int` | Candles each side that must be lower (high) / higher (low) on H4. |
+| `SWING_LOOKBACK_H1` | `int` | Same on H1. |
+| `SWING_LOOKBACK_M5` | `int` | Same on M5. |
+| `MIN_SWING_AMPLITUDE_ATR_MULT` | `float` | Min distance to prev opposite-type swing as multiple of ATR(14). |
+| `BIAS_SWING_COUNT` | `int` | Number of significant swings considered when computing daily bias. |
+
+### Sweep (calibrated)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `SWEEP_RETURN_WINDOW_CANDLES` | `int` | Candles after the wick during which the close must return back across the swept level. |
+
+### MSS (calibrated)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `MSS_DISPLACEMENT_MULTIPLIER` | `float` | MSS body must be ≥ multiplier × mean body of the previous N candles. |
+| `MSS_DISPLACEMENT_LOOKBACK` | `int` | The N above. |
+
+### FVG (calibrated for size; pure logic for geometry)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `FVG_ATR_PERIOD` | `int` | ATR period used to size-filter FVGs. |
+| `FVG_MIN_SIZE_ATR_MULTIPLIER` | `float` | Min FVG size as multiple of ATR(`FVG_ATR_PERIOD`). |
+
+### Setup thresholds
+
+| Key | Type | Meaning |
+|---|---|---|
+| `MIN_RR` | `float` | Minimum risk-reward ratio for a setup to qualify. |
+| `A_PLUS_RR_THRESHOLD` | `float` | RR at or above which grading may upgrade to `A+`. |
+
+### Per-instrument (`INSTRUMENT_CONFIG[symbol]` dict)
+
+| Key | Type | Unit | Meaning |
+|---|---|---|---|
+| `sweep_buffer` | `float` | price units | Min wick excursion beyond a level to count as a sweep. |
+| `equal_hl_tolerance` | `float` | price units | Max distance between two levels to consider them "equal". |
+| `sl_buffer` | `float` | price units | Extra distance beyond sweep extreme for stop loss. |
+
+Units are USD for `XAUUSD`, points for indices (`NAS100`), decimal price
+for FX (`EURUSD`, `GBPUSD`).
+
+### Risk management — hard stops
+
+| Key | Type | Unit | Meaning |
+|---|---|---|---|
+| `ACCOUNT_BALANCE_BASE` | `float` | USD | Base account size; reference for sanity checks. |
+| `DAILY_LOSS_LIMIT` | `float` | USD (absolute) | Broker daily loss cap. |
+| `MAX_LOSS_LIMIT` | `float` | USD (absolute) | Broker max loss cap (challenge bust). |
+| `PROFIT_TARGET` | `float` | USD (absolute) | Phase profit target. |
+| `DAILY_LOSS_STOP_FRACTION` | `float` | fraction (0–1) | System suppresses notifications at this fraction of `DAILY_LOSS_LIMIT`. |
+| `MAX_LOSS_STOP_FRACTION` | `float` | fraction (0–1) | Same vs `MAX_LOSS_LIMIT`; triggers permanent suspension + critical alert. |
+| `RISK_PER_TRADE_FRACTION` | `float` | fraction (0–1) | Fraction of account balance risked per trade (e.g. 0.01 = 1%). |
+| `MAX_TRADES_PER_DAY` | `int` | count | Daily total trade cap across all pairs. |
+| `MAX_TRADES_PER_PAIR_PER_DAY` | `int` | count | Per-pair daily trade cap. |
+| `MAX_CONSECUTIVE_SL_PER_DAY` | `int` | count | Stops the day after this many consecutive SLs. |
+| `NEWS_BLACKOUT_TODAY` | `bool` | — | Manual switch suppressing notifications around scheduled news. |
+
+### Scheduler
+
+| Key | Type | Meaning |
+|---|---|---|
+| `DETECTION_INTERVAL_MINUTES` | `int` | Period of the detection cycle inside killzones. |
+| `HEARTBEAT_AT_KILLZONE_START` | `bool` | Whether to send a Telegram heartbeat at killzone start. |
+
+### Logging
+
+| Key | Type | Meaning |
+|---|---|---|
+| `LOG_FILE` | `str` (path) | Rotating log file path. |
+| `LOG_MAX_BYTES` | `int` | Per-file rotation threshold in bytes. |
+| `LOG_BACKUP_COUNT` | `int` | Number of rotated files to retain. |
+| `LOG_LEVEL` | `str` | Root logger level (`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`). |
+
+### Database
+
+| Key | Type | Meaning |
+|---|---|---|
+| `DB_PATH` | `str` (path) | SQLite journal file path. |
+
+### Chart rendering
+
+| Key | Type | Meaning |
+|---|---|---|
+| `CHART_OUTPUT_DIR` | `str` (path) | Directory for runtime chart screenshots. |
+| `CHART_LOOKBACK_CANDLES_M5` | `int` | M5 candles included in the notification chart. |
+
+### Secrets (from `config/secrets.py`, gitignored)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | `str` | Token from @BotFather. |
+| `TELEGRAM_CHAT_ID` | `int` | Operator's Telegram chat ID. |
+| `MT5_LOGIN` | `int` | MT5 account number. |
+| `MT5_PASSWORD` | `str` | MT5 password. |
+| `MT5_SERVER` | `str` | MT5 server name (exact, from broker). |
+
+---
+
 ## Git conventions
 
 - Branch per sprint or per feature: `sprint-1-bias`, `feat/fvg-detector`.

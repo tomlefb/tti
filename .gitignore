@@ -1,0 +1,55 @@
+# --- Secrets and local config (only the .example versions are committed) ---
+config/secrets.py
+config/settings.py
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+.env
+
+# --- Tooling caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Logs ---
+logs/*.log
+logs/*.log.*
+
+# --- Calibration runs (reports + reference charts ARE committed) ---
+calibration/runs/
+
+# --- Parquet artifacts in calibration runs only; fixtures are committed ---
+calibration/runs/**/*.parquet
+
+# --- SQLite journal (data lives on the Windows host, not in repo) ---
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# --- Runtime chart screenshots ---
+runtime_charts/
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
+
+# --- Editors ---
+.vscode/
+.idea/
+*.swp
+*.swo

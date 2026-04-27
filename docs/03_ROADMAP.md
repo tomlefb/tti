@@ -16,12 +16,17 @@ deviated, and what the next sprint should focus on.
 
 Deliverables:
 
-- [ ] Python 3.11+ env on Windows host with all `requirements.txt` deps installed
-- [ ] `scripts/test_mt5.py` successfully fetches M5 candles from MT5 and prints them
-- [ ] Telegram bot created via BotFather; `scripts/test_telegram.py` sends a message
-- [ ] Git repo set up, Mac↔Windows sync working
-- [ ] `config/secrets.py` and `config/settings.py` populated locally (never committed)
-- [ ] First Telegram heartbeat test from Windows host
+- [ ] Python 3.11+ env on Windows host with all `requirements.txt` deps installed [awaits Windows host validation]
+- [x] `scripts/test_mt5.py` written (runnable on Windows host) — [awaits Windows host validation] for the actual fetch
+- [x] Telegram bot to be created via BotFather; `scripts/test_telegram.py` written — [awaits Windows host validation] for the actual send
+- [ ] Git repo set up, Mac↔Windows sync working [awaits Windows host validation]
+- [ ] `config/secrets.py` and `config/settings.py` populated locally (never committed) [awaits operator]
+- [ ] First Telegram heartbeat test from Windows host [awaits Windows host validation]
+- [x] Project skeleton complete and importable (`src/`, `tests/`, `scripts/`, `logs/`, `calibration/`)
+- [x] `config/settings.py.example` and `config/secrets.py.example` in place; real config gitignored
+- [x] `pytest` passes (trivial smoke test asserts `src` package imports)
+- [x] `black` and `ruff` clean on the whole codebase
+- [x] `pyproject.toml` configures black, ruff, and pytest
 
 **Done when**: a manual run of both test scripts succeeds.
 
