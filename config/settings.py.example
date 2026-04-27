@@ -34,7 +34,7 @@ TZ_NY = ZoneInfo("America/New_York")
 
 WATCHED_PAIRS = [
     "XAUUSD",
-    "NAS100",   # may be "USTEC", "NQ100", etc. depending on broker
+    "NDX100",   # may be "USTEC", "NAS100", "NQ100", etc. depending on broker
     "EURUSD",
     "GBPUSD",
 ]
@@ -113,7 +113,7 @@ INSTRUMENT_CONFIG = {
         "equal_hl_tolerance": 0.5,     # 0.5 USD
         "sl_buffer": 1.0,              # 1 USD beyond sweep extreme
     },
-    "NAS100": {
+    "NDX100": {
         "sweep_buffer": 5.0,           # 5 points
         "equal_hl_tolerance": 3.0,
         "sl_buffer": 5.0,

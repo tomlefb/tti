@@ -22,6 +22,22 @@ Hand-crafted or recorded OHLC data used by unit tests.
 - `calibration/reference_charts/`: operator-marked real charts used to
   tune calibrated thresholds. NOT consumed by unit tests.
 
+## `historical/` — real OHLC exports from MT5
+
+The `historical/` subdirectory contains real OHLC parquet exports for the
+four watched pairs (`XAUUSD`, `NDX100`, `EURUSD`, `GBPUSD`) across four
+timeframes (`D1`, `H4`, `H1`, `M5`), generated on the Windows host by
+`scripts/export_historical_ohlc.py`. They serve as Sprint 1+ development
+fixtures so the Mac developer can iterate on detectors without an MT5
+connection. Files are named `{SYMBOL}_{TF}.parquet`, timestamps are stored
+as UTC `datetime64[ns]` in the `time` column, and columns mirror what
+`mt5.copy_rates_from_pos` returns (`time`, `open`, `high`, `low`, `close`,
+`tick_volume`, `real_volume`, `spread`). **Do not regenerate these files
+casually**: a regeneration shifts the underlying data and silently invalidates
+any test baselines computed against them. If a regeneration is genuinely
+needed, do it as an explicit, reviewed commit and update affected tests in
+the same change.
+
 ## Catalog
 
 (Populated as fixtures are added in Sprints 1+.)

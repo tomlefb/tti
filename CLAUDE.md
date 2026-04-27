@@ -9,7 +9,7 @@
 
 An automated SMC/ICT trade setup **detector** based on TJR Trades' methodology.
 
-It scans 4 instruments (XAUUSD, NAS100, EURUSD, GBPUSD) on the M5 timeframe
+It scans 4 instruments (XAUUSD, NDX100, EURUSD, GBPUSD) on the M5 timeframe
 during London and NY killzones, detects valid setups using deterministic Python
 logic, and sends Telegram notifications with annotated chart screenshots when
 a setup is found. The human operator **manually validates and executes** each

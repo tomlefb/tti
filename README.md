@@ -2,7 +2,7 @@
 
 Automated SMC/ICT setup detector based on TJR Trades' methodology. Sends
 Telegram notifications with annotated chart screenshots when a valid setup
-is found on XAUUSD, NAS100, EURUSD, or GBPUSD during London/NY killzones.
+is found on XAUUSD, NDX100, EURUSD, or GBPUSD during London/NY killzones.
 
 **The system never trades. It only notifies. The human executes manually.**
 

@@ -184,7 +184,7 @@ A single Python process runs continuously on the Windows host. It must:
 - Survive MT5 disconnects (retry with backoff)
 - Log everything to a rotating file (`logs/system.log`)
 - Send a Telegram heartbeat once per killzone start ("✅ London killzone
-  started, watching XAUUSD, NAS100, EURUSD, GBPUSD")
+  started, watching XAUUSD, NDX100, EURUSD, GBPUSD")
 - Send a Telegram alert on critical errors
 
 ## Testing strategy

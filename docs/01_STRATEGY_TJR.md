@@ -176,7 +176,7 @@ instrument AND the "1–2 candles" return window are heuristics that require
 empirical validation. Default values:
 
 - XAUUSD: 1.0 USD
-- NAS100: 5 points
+- NDX100: 5 points
 - EURUSD: 5 pips
 - GBPUSD: 5 pips
 - Return window: 2 candles after the wick
@@ -300,7 +300,7 @@ A setup is **rejected outright** (regardless of all other conditions) if:
 
 - **XAUUSD**: very volatile, sweeps often very clean. Buffer larger to
   account for spread spikes.
-- **NAS100**: best traded during NY killzone. London moves can be choppy.
+- **NDX100**: best traded during NY killzone. London moves can be choppy.
   Watch for cash open volatility at 15:30 Paris.
 - **EURUSD**: best during London killzone. NY can be slow unless USD news.
 - **GBPUSD**: most volatile in London. Strong sweeps in 09:00–10:30 Paris

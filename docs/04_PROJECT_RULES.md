@@ -215,7 +215,7 @@ If a key is renamed, update this table first, then code, then docs.
 | `equal_hl_tolerance` | `float` | price units | Max distance between two levels to consider them "equal". |
 | `sl_buffer` | `float` | price units | Extra distance beyond sweep extreme for stop loss. |
 
-Units are USD for `XAUUSD`, points for indices (`NAS100`), decimal price
+Units are USD for `XAUUSD`, points for indices (`NDX100`), decimal price
 for FX (`EURUSD`, `GBPUSD`).
 
 ### Risk management — hard stops
