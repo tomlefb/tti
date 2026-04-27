@@ -38,6 +38,22 @@ python scripts\test_mt5.py
 python scripts\test_telegram.py
 ```
 
+### Setup (Mac dev machine)
+
+```bash
+# 1. Clone the repo
+git clone <your-repo-url>
+cd tjr-trading-system
+
+# 2. Create venv with Python 3.11 and install Mac deps
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements-mac.txt
+
+# 3. Note: MT5 and Telegram smoke tests can only be run on the
+#    Windows host. The Mac is for dev/test/lint only.
+```
+
 ### Project layout
 
 ```

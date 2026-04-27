@@ -1,0 +1,47 @@
+# ---------------------------------------------------------------
+# Mac development requirements
+# ---------------------------------------------------------------
+# This file is for the developer Mac only. It mirrors
+# requirements.txt EXCEPT it excludes MetaTrader5, which is
+# Windows-only and has no macOS wheel.
+#
+# On Windows: use requirements.txt (canonical).
+# On Mac:     use requirements-mac.txt.
+#
+# When adding a new dep: update BOTH files unless the dep is
+# platform-specific. The Configuration reference table in
+# docs/04_PROJECT_RULES.md does not need updating for dep
+# changes (it's for config keys, not packages).
+# ---------------------------------------------------------------
+
+# Data manipulation
+pandas>=2.1.0,<3.0
+numpy>=1.26.0,<2.0
+
+# Indicators (optional, custom implementations preferred for SMC primitives)
+# pandas-ta intentionally removed — custom indicator implementations preferred (see CLAUDE.md tech stack note).
+# If a future sprint genuinely needs it, evaluate `pandas-ta-classic` (NumPy 2.x compatible community fork) before reintroducing.
+
+# Charting
+mplfinance>=0.12.10b0
+matplotlib>=3.8.0
+
+# Telegram bot
+python-telegram-bot>=21.0
+
+# Scheduling
+APScheduler>=3.10.4
+
+# Timezones (stdlib zoneinfo on 3.9+, but pytz kept for safety)
+pytz>=2024.1
+
+# Persistence — sqlite3 is stdlib; sqlalchemy optional for ergonomics
+SQLAlchemy>=2.0.25
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+
+# Development
+black>=24.0.0
+ruff>=0.3.0
