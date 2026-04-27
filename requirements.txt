@@ -2,11 +2,12 @@
 MetaTrader5>=5.0.45
 
 # Data manipulation
-pandas>=2.1.0
-numpy>=1.26.0
+pandas>=2.1.0,<3.0
+numpy>=1.26.0,<2.0
 
 # Indicators (optional, custom implementations preferred for SMC primitives)
-pandas-ta>=0.3.14b
+# pandas-ta intentionally removed — custom indicator implementations preferred (see CLAUDE.md tech stack note).
+# If a future sprint genuinely needs it, evaluate `pandas-ta-classic` (NumPy 2.x compatible community fork) before reintroducing.
 
 # Charting
 mplfinance>=0.12.10b0
