@@ -1,0 +1,185 @@
+"""
+Project-wide configuration. All thresholds, watched pairs, sessions, and
+buffers live here. No magic numbers in detection code.
+
+Tuning these values is the operator's call, informed by the calibration
+protocol described in `docs/07_DETECTION_PHILOSOPHY.md`. Claude Code
+should not modify this file without explicit request.
+"""
+
+from zoneinfo import ZoneInfo
+
+# Imported from secrets (gitignored). See secrets.py.example.
+from config.secrets import (
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID,
+    MT5_LOGIN,
+    MT5_PASSWORD,
+    MT5_SERVER,
+)
+
+# -----------------------------------------------------------------------------
+# Timezones
+# -----------------------------------------------------------------------------
+
+TZ_PARIS = ZoneInfo("Europe/Paris")
+TZ_UTC = ZoneInfo("UTC")
+TZ_NY = ZoneInfo("America/New_York")
+
+# -----------------------------------------------------------------------------
+# Watched instruments
+# -----------------------------------------------------------------------------
+# Symbol names must match those exposed by the MT5 terminal (varies by broker).
+# Adjust if your broker uses different symbol names (e.g., "XAUUSD.r" instead of "XAUUSD").
+
+WATCHED_PAIRS = [
+    "XAUUSD",
+    "NAS100",   # may be "USTEC", "NQ100", etc. depending on broker
+    "EURUSD",
+    "GBPUSD",
+]
+
+# -----------------------------------------------------------------------------
+# Sessions (Paris time)
+# -----------------------------------------------------------------------------
+# Format: (start_hour, start_minute, end_hour, end_minute)
+
+SESSION_ASIA = (2, 0, 6, 0)
+KILLZONE_LONDON = (9, 0, 12, 0)
+KILLZONE_NY = (15, 30, 18, 0)
+
+# -----------------------------------------------------------------------------
+# Detection: SWING POINTS (calibrated rule)
+# -----------------------------------------------------------------------------
+# See `docs/07_DETECTION_PHILOSOPHY.md` section 1.2 and section 3.
+# These default values are placeholders and MUST be calibrated against
+# operator-marked reference charts before being trusted in production.
+
+# Lookback: number of candles each side that must be lower (for high) or higher (for low).
+# 1 = strict 3-bar fractal (very noisy). 2-3 = more selective.
+SWING_LOOKBACK_H4 = 2
+SWING_LOOKBACK_H1 = 2
+SWING_LOOKBACK_M5 = 2
+
+# Significant-swing amplitude filter:
+# A swing only counts if its distance to the previous opposite-type swing
+# is >= this multiplier × ATR(14) on the same timeframe.
+MIN_SWING_AMPLITUDE_ATR_MULT = 0.5
+
+# Number of confirmed significant swings to consider when computing daily bias.
+BIAS_SWING_COUNT = 4
+
+# -----------------------------------------------------------------------------
+# Detection: SWEEP (calibrated rule)
+# -----------------------------------------------------------------------------
+
+# Number of candles after the wick during which the close must return
+# back across the swept level. 1 = same candle only; 2-3 = grace period.
+SWEEP_RETURN_WINDOW_CANDLES = 2
+
+# -----------------------------------------------------------------------------
+# Detection: MSS (calibrated rule)
+# -----------------------------------------------------------------------------
+
+# MSS displacement: candle body must be >= multiplier * mean(body of previous N candles).
+MSS_DISPLACEMENT_MULTIPLIER = 1.5
+MSS_DISPLACEMENT_LOOKBACK = 20
+
+# -----------------------------------------------------------------------------
+# Detection: FVG (calibrated rule for size; pure logic for geometry)
+# -----------------------------------------------------------------------------
+
+FVG_ATR_PERIOD = 14
+FVG_MIN_SIZE_ATR_MULTIPLIER = 0.3
+
+# -----------------------------------------------------------------------------
+# Detection: SETUP THRESHOLDS (mostly heuristic)
+# -----------------------------------------------------------------------------
+
+MIN_RR = 3.0
+A_PLUS_RR_THRESHOLD = 4.0
+
+# -----------------------------------------------------------------------------
+# Per-instrument config (calibrated rules)
+# -----------------------------------------------------------------------------
+# Sweep buffer: minimum wick excursion beyond a level to count as a sweep.
+# Equal H/L tolerance: max distance between two levels to consider them "equal".
+# SL buffer: extra distance beyond sweep extreme for stop loss.
+# Units are price units (USD for XAU, points for indices, decimal price for forex).
+
+INSTRUMENT_CONFIG = {
+    "XAUUSD": {
+        "sweep_buffer": 1.0,           # 1 USD
+        "equal_hl_tolerance": 0.5,     # 0.5 USD
+        "sl_buffer": 1.0,              # 1 USD beyond sweep extreme
+    },
+    "NAS100": {
+        "sweep_buffer": 5.0,           # 5 points
+        "equal_hl_tolerance": 3.0,
+        "sl_buffer": 5.0,
+    },
+    "EURUSD": {
+        "sweep_buffer": 0.00050,       # 5 pips
+        "equal_hl_tolerance": 0.00030,
+        "sl_buffer": 0.00050,
+    },
+    "GBPUSD": {
+        "sweep_buffer": 0.00050,
+        "equal_hl_tolerance": 0.00030,
+        "sl_buffer": 0.00050,
+    },
+}
+
+# -----------------------------------------------------------------------------
+# Risk management — hard stops
+# -----------------------------------------------------------------------------
+
+# Funded Next Stellar Lite 2-Step P1 5K — verify on dashboard.
+ACCOUNT_BALANCE_BASE = 5000.0
+DAILY_LOSS_LIMIT = 200.0           # 4% of $5K
+MAX_LOSS_LIMIT = 400.0             # 8% of $5K
+PROFIT_TARGET = 400.0
+
+# Safety buffers — system stops sending notifs at this fraction of the limit.
+DAILY_LOSS_STOP_FRACTION = 0.80    # 80% of $200 = $160
+MAX_LOSS_STOP_FRACTION = 0.80      # 80% of $400 = $320
+
+# Risk per trade (fraction of account balance).
+RISK_PER_TRADE_FRACTION = 0.01     # 1%
+
+# Daily caps.
+MAX_TRADES_PER_DAY = 2
+MAX_TRADES_PER_PAIR_PER_DAY = 2
+MAX_CONSECUTIVE_SL_PER_DAY = 2
+
+# News blackout (manual switch for v1; integrate calendar later).
+NEWS_BLACKOUT_TODAY = False
+
+# -----------------------------------------------------------------------------
+# Scheduler
+# -----------------------------------------------------------------------------
+
+DETECTION_INTERVAL_MINUTES = 5     # Run detection every 5 min during killzones.
+HEARTBEAT_AT_KILLZONE_START = True
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+
+LOG_FILE = "logs/system.log"
+LOG_MAX_BYTES = 10 * 1024 * 1024   # 10 MB
+LOG_BACKUP_COUNT = 5
+LOG_LEVEL = "INFO"
+
+# -----------------------------------------------------------------------------
+# Database
+# -----------------------------------------------------------------------------
+
+DB_PATH = "data/journal.db"
+
+# -----------------------------------------------------------------------------
+# Chart rendering
+# -----------------------------------------------------------------------------
+
+CHART_OUTPUT_DIR = "runtime_charts"
+CHART_LOOKBACK_CANDLES_M5 = 80     # M5 candles shown in notification chart
