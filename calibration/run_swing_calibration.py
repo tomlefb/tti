@@ -55,8 +55,18 @@ _TF_TO_TIMEDELTA = {
     "H1": pd.Timedelta(hours=1),
 }
 
-# Matching tolerances (per spec).
-_TIME_TOLERANCE_CANDLES = 1
+# Matching tolerances.
+#
+# Operator pivot annotation marks the first candle touching the structural
+# high/low. Detector's strict fractal marks the confirmed pivot candle,
+# which can fall 1-3 candles later in flat-zone tops/bottoms. The wider
+# time tolerance accounts for this without being so loose that genuinely
+# different pivots match. H1 needs more slack than H4 because flat zones
+# span more candles at lower timeframes.
+_TIME_TOLERANCE_CANDLES_BY_TF: dict[str, int] = {
+    "H4": 2,
+    "H1": 3,
+}
 _PRICE_TOLERANCE_FRACTION = 0.001  # 0.1 %
 
 _PASSING_THRESHOLD = 0.80  # 80 %, per docs/07 §3 step 4
@@ -299,7 +309,7 @@ def _match(
     the same type that is still within both tolerances; mark both as
     matched. Anything left over is FP / FN.
     """
-    time_tol = _TF_TO_TIMEDELTA[timeframe] * _TIME_TOLERANCE_CANDLES
+    time_tol = _TF_TO_TIMEDELTA[timeframe] * _TIME_TOLERANCE_CANDLES_BY_TF[timeframe]
     matched_detected: set[int] = set()
     tp = 0
     fns: list[dict[str, Any]] = []
@@ -487,8 +497,14 @@ def _build_report(
         lines.append("| Date | Pair | TF | Type | Time (UTC) | Price | Candidate reason |")
         lines.append("|---|---|---|---|---|---|---|")
         for a, sw in fps_all[:10]:
+            tol = _TIME_TOLERANCE_CANDLES_BY_TF[a.timeframe]
             lines.append(
-                _fmt_swing_row(a, sw, "no operator mark within ±1 candle / ±0.1% — likely noise")
+                _fmt_swing_row(
+                    a,
+                    sw,
+                    f"no operator mark within ±{tol} candle / "
+                    f"±{_PRICE_TOLERANCE_FRACTION * 100:g}% — likely noise",
+                )
             )
     lines.append("")
 
@@ -500,8 +516,15 @@ def _build_report(
         lines.append("| Date | Pair | TF | Type | Time (UTC) | Price | Candidate reason |")
         lines.append("|---|---|---|---|---|---|---|")
         for a, sw in fns_all[:10]:
+            tol = _TIME_TOLERANCE_CANDLES_BY_TF[a.timeframe]
             lines.append(
-                _fmt_swing_row(a, sw, "amplitude below filter or fractal lookback too wide")
+                _fmt_swing_row(
+                    a,
+                    sw,
+                    f"no detector pivot within ±{tol} candle / "
+                    f"±{_PRICE_TOLERANCE_FRACTION * 100:g}% — amplitude below filter "
+                    f"or fractal lookback too wide",
+                )
             )
     lines.append("")
 

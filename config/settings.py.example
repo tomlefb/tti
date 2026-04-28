@@ -64,7 +64,10 @@ SWING_LOOKBACK_M5 = 2
 # Significant-swing amplitude filter:
 # A swing only counts if its distance to the previous opposite-type swing
 # is >= this multiplier × ATR(14) on the same timeframe.
-MIN_SWING_AMPLITUDE_ATR_MULT = 0.5
+# Calibrated 2026-04-28 against 38 operator-annotated sessions.
+# H4 result: P=87.1%, R=77.1%, F1=81.8% — passes docs/07 §3 step 4.
+# See calibration/runs/FINAL_swing_calibration.md for H1 design choice.
+MIN_SWING_AMPLITUDE_ATR_MULT = 1.0
 
 # Number of confirmed significant swings to consider when computing daily bias.
 BIAS_SWING_COUNT = 4

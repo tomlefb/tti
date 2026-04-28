@@ -29,8 +29,12 @@ htmlcov/
 logs/*.log
 logs/*.log.*
 
-# --- Calibration runs (reports + reference charts ARE committed) ---
-calibration/runs/
+# --- Calibration runs ---
+# Auto-generated timestamped reports are noise; the manually-curated
+# FINAL_*.md canonical records are committed. Ignore directory contents
+# rather than the directory itself, so the exception below can match.
+calibration/runs/*
+!calibration/runs/FINAL_*.md
 
 # --- Parquet artifacts in calibration runs only; fixtures are committed ---
 calibration/runs/**/*.parquet

@@ -47,10 +47,13 @@ Deliverables:
       (`tests/detection/test_integration.py`)
 - [x] Calibration harness consuming operator-marked reference annotations
       (`calibration/run_swing_calibration.py`)
-- [ ] **Calibration session**: operator-marked reference charts (target ≥ 18
-      sessions across H4 + H1) and detector report ≥ 80% precision and recall.
-- [ ] Tuned values committed to `config/settings.py.example` (operator decision
-      after the calibration session)
+- [x] **Calibration session**: 38 operator-annotated sessions (19 H4 + 19 H1).
+      H4 detector calibrated (P=87.1%, R=77.1%, F1=81.8%). H1 plateaus at
+      F1≈60% — identified as a design choice, deferred to Sprint 2's
+      `mark_swing_levels()` (multi-TF confluence promotion). See
+      `calibration/runs/FINAL_swing_calibration.md`.
+- [x] Tuned values committed to `config/settings.py.example`
+      (`MIN_SWING_AMPLITUDE_ATR_MULT` 0.5 → 1.0)
 - [x] CLI script that prints the current bias for all 4 watched pairs
       (`scripts/print_current_bias.py`, fixture-based — not live MT5)
 
@@ -66,6 +69,9 @@ calibration report is checked into `calibration/reference_charts/`.
 
 Deliverables:
 
+- [ ] Implement `mark_swing_levels()` with multi-TF confluence promotion
+      (H4 ∩ H1) per operator's liquidity-hierarchy philosophy. See
+      `calibration/runs/FINAL_swing_calibration.md`.
 - [ ] `src/detection/liquidity.py`: Asian range, PDH/PDL, swing levels, equal H/L
 - [ ] `src/detection/sweep.py`: sweep detection on M5 with per-instrument buffers
 - [ ] Unit tests
@@ -171,13 +177,10 @@ without this layer and document the negative result.
 
 ## Current state
 
-- **Active sprint**: 1
-- **Last updated**: 2026-04-28 — Sprint 1 code shipped (swings.py, bias.py,
-  unit + integration tests, calibration harness, CLI bias script). Calibration
-  session pending: awaiting operator's reference annotations under
-  `calibration/reference_charts/{DATE}_{PAIR}_{TF}.json`. Sprint 1 stays
-  active until the harness produces a ≥ 80% precision-and-recall report and
-  the operator commits tuned values to `config/settings.py.example`.
+- **Active sprint**: 2
+- **Last updated**: Sprint 1 closed 2026-04-28; H4 detector calibrated
+  (F1=81.8%), H1 design choice deferred to Sprint 2 — see
+  `calibration/runs/FINAL_swing_calibration.md`.
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.

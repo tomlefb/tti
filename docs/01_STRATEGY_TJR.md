@@ -153,6 +153,18 @@ instrument:
 
 These levels are the candidates that price may sweep.
 
+**Note on H1 swings (Sprint 2 design choice)**:
+
+Operator's strategy treats liquidity strength as a function of multi-TF
+confluence. A swing H1 level that ALSO coincides with a swing H4 level
+is "major" (high order accumulation, high reversal probability); an
+isolated H1 pivot is "minor" and typically not traded.
+
+Sprint 2's `mark_swing_levels()` will promote multi-TF confluent levels
+when populating the liquidity pool that the sweep detector watches.
+Implementation detail TBD; revisit during Sprint 2 implementation.
+See `calibration/runs/FINAL_swing_calibration.md` for context.
+
 ---
 
 ## 5. The setup (entry workflow)
