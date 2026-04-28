@@ -97,6 +97,14 @@ from src.detection.liquidity import (  # noqa: E402
     swing_level_to_marked_level,
 )
 from src.detection.setup import build_setup_candidates  # noqa: E402
+from src.journal.db import get_engine, init_db, session_scope  # noqa: E402
+from src.journal.repository import (  # noqa: E402
+    get_decision,
+    get_setup,
+    insert_decision,
+    insert_setup,
+    setup_uid_for,
+)
 from src.notification.chart_renderer import render_setup_chart  # noqa: E402
 from src.notification.message_formatter import format_setup_message  # noqa: E402
 from src.notification.telegram_bot import TelegramNotifier  # noqa: E402
@@ -221,11 +229,37 @@ async def _run(args) -> int:
         print("--no-send specified — skipping Telegram send.")
         return 0
 
+    # Sprint 5: persist the setup before sending so the eventual button
+    # callback can attach a decision row. Idempotent on setup_uid — safe
+    # to re-run the script with the same fixture.
+    db_path = getattr(settings, "DB_PATH", "data/journal.db")
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    engine = get_engine(db_path)
+    init_db(engine)
+
+    setup_uid = setup_uid_for(setup)
+    with session_scope(engine) as s:
+        insert_setup(s, setup, was_notified=True)
+    print(f"Journal: setup persisted (uid={setup_uid}) — db={db_path}")
+
     received: dict[str, tuple[str, str, datetime]] = {}
 
     def on_callback(decision: str, sid: str, ts: datetime) -> None:
         received["payload"] = (decision, sid, ts)
         print(f"\nCallback received: decision={decision!r} sid={sid!r} ts={ts.isoformat()}")
+        try:
+            with session_scope(engine) as ss:
+                # Defensive: scripts may send a setup that wasn't inserted
+                # earlier (e.g. callback fires before the insert flushed).
+                if get_setup(ss, sid) is None:
+                    insert_setup(ss, setup, was_notified=True)
+                if get_decision(ss, sid) is None:
+                    insert_decision(ss, sid, decision, ts)
+                    print(f"Journal: decision persisted (uid={sid}, decision={decision})")
+                else:
+                    print(f"Journal: decision already exists for uid={sid}, ignoring.")
+        except Exception as exc:  # noqa: BLE001 — surface to operator, don't crash bot
+            print(f"Journal write failed: {exc!r}", file=sys.stderr)
 
     notifier = TelegramNotifier(
         bot_token=str(settings.TELEGRAM_BOT_TOKEN),

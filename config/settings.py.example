@@ -254,10 +254,17 @@ LOG_BACKUP_COUNT = 5
 LOG_LEVEL = "INFO"
 
 # -----------------------------------------------------------------------------
-# Database
+# Database / Journal (Sprint 5)
 # -----------------------------------------------------------------------------
 
 DB_PATH = "data/journal.db"
+
+# Outcome tracker (Sprint 5)
+# Time window (in minutes) used to match an MT5 trade to a journaled
+# Taken setup. The operator may take 5–20 minutes to click Taken and
+# place the order, so ±30 covers the realistic spread without
+# admitting unrelated trades on the same symbol.
+OUTCOME_MATCH_WINDOW_MINUTES = 30
 
 # -----------------------------------------------------------------------------
 # Notification (Sprint 4)

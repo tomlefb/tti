@@ -264,11 +264,12 @@ for FX (`EURUSD`, `GBPUSD`).
 | `LOG_BACKUP_COUNT` | `int` | Number of rotated files to retain. |
 | `LOG_LEVEL` | `str` | Root logger level (`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL`). |
 
-### Database
+### Database / Journal (Sprint 5)
 
 | Key | Type | Meaning |
 |---|---|---|
 | `DB_PATH` | `str` (path) | SQLite journal file path. |
+| `OUTCOME_MATCH_WINDOW_MINUTES` | `int` | ± window (minutes) used by the outcome tracker to match an MT5 trade to a journaled `taken` setup, against `setup.timestamp_utc` (MSS confirm time). |
 
 ### Notification (Sprint 4)
 

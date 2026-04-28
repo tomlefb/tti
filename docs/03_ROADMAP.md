@@ -173,18 +173,33 @@ decision (Sprint 5 will hook this into the journal).
 
 Deliverables:
 
-- [ ] Hook the Telegram callback (Taken/Skipped) into SQLite persistence
-      (currently stubs in `src/notification/telegram_bot.py` via the
-      `on_callback` parameter).
-- [ ] Persist ALL detected setups, including rejected ones (useful for
-      tuning).
-- [ ] Outcome tracker reconciles MT5 trade history with journal setups
-      by symbol + timestamp proximity.
-- [ ] `src/journal/schema.sql` and migrations
-- [ ] `src/journal/repository.py` for CRUD
-- [ ] `src/journal/outcome_tracker.py` queries MT5 history daily
-- [ ] Simple Streamlit dashboard (or jupyter notebook) showing stats:
-      detection count, taken vs skipped, win rate, avg RR, by pair, by quality
+- [x] SQLAlchemy 2.0 schema + programmatic migrations (`src/journal/models.py`,
+      `src/journal/db.py`). Four tables: `setups`, `decisions`, `outcomes`,
+      `daily_state`. Foreign keys enforced via SQLite `PRAGMA foreign_keys=ON`
+      connect hook. No Alembic — schema is small and stable; revisit in
+      Sprint 6+ if it shifts.
+- [x] Repository CRUD layer (`src/journal/repository.py`). Functions, not
+      classes; caller manages transactions via `session_scope`. Idempotent
+      `insert_setup` on `setup_uid`. `confluences` JSON-encoded as TEXT.
+- [x] Hook the Telegram callback (Taken/Skipped) into SQLite persistence
+      via the existing `on_callback` parameter. Wired in
+      `scripts/test_notification.py` (smoke test) — production scheduler
+      in Sprint 6 will reuse the same pattern.
+- [~] Persist ALL detected setups, including rejected ones — repository
+      surface is in place (`insert_setup(..., was_notified=False,
+      rejection_reason=...)`). Wiring into `build_setup_candidates`
+      deferred to Sprint 6 per the architectural recommendation: keep
+      detection pure, persist in the scheduler wrapper.
+- [x] Outcome tracker reconciles MT5 trade history with journal setups
+      by symbol + timestamp proximity (`src/journal/outcome_tracker.py`,
+      CLI `scripts/run_outcome_tracker.py`). Duck-typed `Mt5Client`
+      protocol — production wiring drops in once `mt5_client` ships in
+      Sprint 6. Match window: ±`OUTCOME_MATCH_WINDOW_MINUTES` (default 30).
+- [x] Streamlit dashboard (`dashboard.py`) with KPIs, per-pair / per-quality
+      tables, recent-setups feed, outcome-distribution chart, sidebar
+      filters (date / pair / quality / decision). Read-only.
+- [x] Tests: `tests/journal/test_models.py`, `test_repository.py`,
+      `test_outcome_tracker.py` against in-memory SQLite + mock MT5 client.
 
 **Done when**: operator can see, for any past day, what was detected, what
 was taken, what won, what lost.
@@ -231,12 +246,15 @@ without this layer and document the negative result.
 
 ## Current state
 
-- **Active sprint**: 5
-- **Last updated**: Sprint 4 closed 2026-04-28; Telegram notifications +
-  chart rendering shipped. Killzone gating filter added (16 → 13 setups).
-  Sample chart visually validated. Manual E2E test pending on Windows host
-  (`scripts/test_notification.py`). Sprint 5 ready: journal & outcome
-  tracking.
+- **Active sprint**: 6
+- **Last updated**: Sprint 5 closed 2026-04-28; SQLite journal shipped with
+  SQLAlchemy 2.0 schema, repository CRUD, outcome tracker (MT5 reconciliation),
+  and Streamlit dashboard. Telegram callback wired to journal persistence in
+  `scripts/test_notification.py`. Detection-pipeline persistence intentionally
+  deferred to Sprint 6 (scheduler wrapper) to keep `build_setup_candidates`
+  pure. `mt5_client` wrapper is still a stub — outcome tracker exercised via
+  mock client in unit tests; production reconciliation lights up once
+  Sprint 6 ships the MT5 client.
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.

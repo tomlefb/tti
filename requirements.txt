@@ -28,6 +28,9 @@ pytz>=2024.1
 # Persistence — sqlite3 is stdlib; sqlalchemy optional for ergonomics
 SQLAlchemy>=2.0.25
 
+# Dashboard (Sprint 5) — read-only Streamlit view of the journal
+streamlit>=1.30
+
 # Parquet I/O — used for historical OHLC fixtures and any future columnar storage
 pyarrow>=15.0
 
