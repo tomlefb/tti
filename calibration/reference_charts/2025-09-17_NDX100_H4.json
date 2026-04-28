@@ -1,0 +1,20 @@
+{
+  "date": "2025-09-17",
+  "pair": "NDX100",
+  "timeframe": "H4",
+  "regime": "volatile_news",
+  "annotation_window_utc": {
+    "start": "2025-09-17T00:00:00Z",
+    "end": "2025-09-17T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2025-09-17T18:00:00Z",
+      "price": 23998.77,
+      "note": "big sweep SSL post-FOMC, low du jour, pivot du reversal massif"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "FOMC sept. En H4, seul le big sweep down post-annonce est un pivot net dans la fenetre. Les LH-LL-LH intermediaires de la compression pre-FOMC (visibles en H1) sont noyes dans 1-2 candles H4 et ne forment pas de pivot H4 propre. Le low 23998.77 est le point de retournement avant rallye HH/HL des jours suivants. Choix conservateur 1 swing - le high pre-FOMC (24307) pourrait etre marque mais reste dans la zone de compression sans constituer un pivot H4 distinct."
+}

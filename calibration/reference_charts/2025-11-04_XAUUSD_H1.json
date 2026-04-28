@@ -1,0 +1,44 @@
+{
+  "date": "2025-11-04",
+  "pair": "XAUUSD",
+  "timeframe": "H1",
+  "regime": "trending_bearish",
+  "annotation_window_utc": {
+    "start": "2025-11-04T00:00:00Z",
+    "end": "2025-11-04T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2025-11-04T06:00:00Z",
+      "price": 3966.605,
+      "note": "LL initial, premier point bas du sell-off"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-11-04T08:00:00Z",
+      "price": 4000.855,
+      "note": "LH rebond technique avant capitulation"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-11-04T14:00:00Z",
+      "price": 3928.685,
+      "note": "LL capitulation, low du jour, -72 USD depuis le LH"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-11-04T16:00:00Z",
+      "price": 3975.685,
+      "note": "LH post-capitulation, rebond de session US tardive"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-11-04T21:00:00Z",
+      "price": 3930.56,
+      "note": "HL au-dessus du LL de 14:00, signature CHOCH = retournement bullish anticipe"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Capitulation -72 USD avec changement de structure (CHOCH) en fin de journee. Sequence LL-LH-LL-LH-HL : le HL final (3930.560) est seulement +1.87 USD au-dessus du LL de 14:00 mais c'est le pivot critique qui definit le retournement bullish des jours suivants. 5 swings = trending day complet avec transition. Pivot critique pour la strategie."
+}

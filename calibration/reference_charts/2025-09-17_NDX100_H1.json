@@ -1,0 +1,38 @@
+{
+  "date": "2025-09-17",
+  "pair": "NDX100",
+  "timeframe": "H1",
+  "regime": "volatile_news",
+  "annotation_window_utc": {
+    "start": "2025-09-17T00:00:00Z",
+    "end": "2025-09-17T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-09-17T07:00:00Z",
+      "price": 24307.79,
+      "note": "LH initial pre-FOMC, premier top de la compression"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-09-17T08:00:00Z",
+      "price": 24211.42,
+      "note": "LL intermediaire, sweep down mineur"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-09-17T13:00:00Z",
+      "price": 24295.54,
+      "note": "LH pre-annonce, re-test du first high a -12 pts, dernier rebond avant FOMC"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-09-17T18:00:00Z",
+      "price": 23998.77,
+      "note": "big sweep SSL post-FOMC, -297 pts depuis le LH, pivot du reversal massif"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Pattern FOMC textbook : compression LH-LL-LH avant l'annonce (07:00 -> 13:00) puis sweep brutal SSL post-annonce (18:00, -297 pts). Le low 23998.77 est le pivot critique du jour, point de retournement avant rallye HH/HL des jours suivants. 4 swings capturent toute la sequence fake-move + reversal."
+}

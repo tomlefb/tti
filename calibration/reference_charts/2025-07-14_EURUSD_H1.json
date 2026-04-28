@@ -1,0 +1,32 @@
+{
+  "date": "2025-07-14",
+  "pair": "EURUSD",
+  "timeframe": "H1",
+  "regime": "dead",
+  "annotation_window_utc": {
+    "start": "2025-07-14T00:00:00Z",
+    "end": "2025-07-14T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-07-14T01:00:00Z",
+      "price": 1.16977,
+      "note": "top de range, session asia"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-07-14T06:00:00Z",
+      "price": 1.16541,
+      "note": "sweep low session europe"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-07-14T21:00:00Z",
+      "price": 1.16577,
+      "note": "bottom fin de journee, retest low"
+    }
+  ],
+  "annotator_confidence": "medium",
+  "annotation_notes": "Range serre ~44 pips, oscillation propre mais journee dead. Drop le retest high de 11:00 (trop proche du high de 01:00, -6 pips). 3 pivots gardes pour raconter top-sweep-bottom."
+}

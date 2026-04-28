@@ -1,0 +1,13 @@
+{
+  "date": "2025-08-12",
+  "pair": "XAUUSD",
+  "timeframe": "H4",
+  "regime": "dead",
+  "annotation_window_utc": {
+    "start": "2025-08-12T00:00:00Z",
+    "end": "2025-08-12T23:59:59Z"
+  },
+  "swings": [],
+  "annotator_confidence": "high",
+  "annotation_notes": "Aucun swing H4 significatif sur la journee. Le range du jour (~13 USD entre les extremes du candle H4 le plus large) est noye dans la structure descendante plus large. Conforme regle 3 (dead = 0/1/2 swings)."
+}

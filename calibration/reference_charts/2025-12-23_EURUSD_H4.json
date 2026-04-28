@@ -1,0 +1,26 @@
+{
+  "date": "2025-12-23",
+  "pair": "EURUSD",
+  "timeframe": "H4",
+  "regime": "trending_bullish",
+  "annotation_window_utc": {
+    "start": "2025-12-23T00:00:00Z",
+    "end": "2025-12-23T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-12-23T10:00:00Z",
+      "price": 1.18021,
+      "note": "high du jour, peak du rallye 1.166->1.181"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-12-23T14:00:00Z",
+      "price": 1.17639,
+      "note": "low post-high, retracement avant reprise"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Veille de Noel, dernier leg du rallye annonce. Le high 1.18021 est le peak global du rallye avant retournement bearish des jours suivants (chart -> 1.173 fin decembre). Pattern de distribution top plutot que trending bullish pur, mais regime liste conserve. 2 swings H4 capturent le pivot."
+}

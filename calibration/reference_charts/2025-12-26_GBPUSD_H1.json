@@ -1,0 +1,32 @@
+{
+  "date": "2025-12-26",
+  "pair": "GBPUSD",
+  "timeframe": "H1",
+  "regime": "dead",
+  "annotation_window_utc": {
+    "start": "2025-12-26T00:00:00Z",
+    "end": "2025-12-26T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2025-12-26T06:00:00Z",
+      "price": 1.34769,
+      "note": "low d'ouverture, jour ferie UK"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-12-26T10:00:00Z",
+      "price": 1.35271,
+      "note": "top du range Boxing Day"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-12-26T17:00:00Z",
+      "price": 1.34814,
+      "note": "HL post-high, debut retracement"
+    }
+  ],
+  "annotator_confidence": "medium",
+  "annotation_notes": "Boxing Day, ouverture decalee 06:00 UTC. Structure low-high-low formant un HL net post-high. 3 swings = au-dessus de l'attendu pour un dead (regle 3) mais structure defendable. Le 2eme low (1.34814) est a 4.5 pips du low principal, marque pour capturer le retracement structurel pas pour son amplitude."
+}

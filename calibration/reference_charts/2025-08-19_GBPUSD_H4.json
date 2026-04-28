@@ -1,0 +1,20 @@
+{
+  "date": "2025-08-19",
+  "pair": "GBPUSD",
+  "timeframe": "H4",
+  "regime": "trending_bearish",
+  "annotation_window_utc": {
+    "start": "2025-08-19T00:00:00Z",
+    "end": "2025-08-19T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-08-19T09:00:00Z",
+      "price": 1.35311,
+      "note": "LH du sell-off, top du rebond technique avant continuation bearish"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "2e jour de sell-off propre. Sur trending day directionnel, pas de low H4 a marquer dans la fenetre : la chute continue sur le 20 aout, le low du 19 isole serait juste un point sur la trajectoire descendante non-pivot. 1 seul swing high (LH) suffit pour capturer la structure bearish a cette echelle."
+}

@@ -1,0 +1,26 @@
+{
+  "date": "2025-09-01",
+  "pair": "NDX100",
+  "timeframe": "H1",
+  "regime": "dead",
+  "annotation_window_utc": {
+    "start": "2025-09-01T00:00:00Z",
+    "end": "2025-09-01T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2025-09-01T06:00:00Z",
+      "price": 23332.66,
+      "note": "low de session europe avant US"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-09-01T14:00:00Z",
+      "price": 23467.88,
+      "note": "high de session US reduite (Labor Day)"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Labor Day US, marche US ferme. Memes pivots structurels qu'en H4 (les candles H1 du low/high font le low/high du candle H4 conteneur). Aucun micro-pivot intra-journee significatif visible. Conforme regle 3 (dead = 0/1/2)."
+}

@@ -1,0 +1,26 @@
+{
+  "date": "2026-03-04",
+  "pair": "NDX100",
+  "timeframe": "H4",
+  "regime": "trending_bullish",
+  "annotation_window_utc": {
+    "start": "2026-03-04T00:00:00Z",
+    "end": "2026-03-04T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2026-03-04T06:00:00Z",
+      "price": 24465.43,
+      "note": "bottom du jour, depart du rebond +495 pts (dead-cat bounce)"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-03-04T19:00:00Z",
+      "price": 25182.5,
+      "note": "peak du dead-cat bounce, top avant retournement bearish des jours suivants"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Dead-cat bounce +495 pts. En H4, 2 swings extremes capturent le mouvement complet (low matin -> high soir). Le HH intermediaire et le HL de retracement (visibles en H1) tombent dans le meme candle H4 et ne forment pas de pivot H4 distinct. Le high 25182.50 est le peak du rebond avant retournement bearish des jours suivants (chart reprend le downtrend)."
+}

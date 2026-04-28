@@ -1,0 +1,32 @@
+{
+  "date": "2026-01-02",
+  "pair": "EURUSD",
+  "timeframe": "H1",
+  "regime": "range",
+  "annotation_window_utc": {
+    "start": "2026-01-02T00:00:00Z",
+    "end": "2026-01-02T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2026-01-02T07:00:00Z",
+      "price": 1.1747,
+      "note": "premier top du range"
+    },
+    {
+      "type": "low",
+      "time_utc": "2026-01-02T10:00:00Z",
+      "price": 1.17131,
+      "note": "sweep down, liquidity grab des stops bas"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-01-02T16:00:00Z",
+      "price": 1.17545,
+      "note": "retour top + leger break, pivot avant cassure"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Memes pivots structurels qu'en H4 (sweep majeur 34 pips + retour 41 pips capturent le mouvement complet, pas de micro-pivots H1 entre les extremes). Range avec liquidity grab bilateral typique."
+}

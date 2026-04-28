@@ -1,0 +1,20 @@
+{
+  "date": "2025-06-06",
+  "pair": "XAUUSD",
+  "timeframe": "H4",
+  "regime": "volatile_news",
+  "annotation_window_utc": {
+    "start": "2025-06-06T00:00:00Z",
+    "end": "2025-06-06T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-06-06T05:00:00Z",
+      "price": 3375.705,
+      "note": "top du jour pre-NFP, peak avant sell-off massif"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "NFP Friday. En H4, seul le high pre-NFP est un pivot net dans la fenetre. Le sell-off continue sur le 7-8 juin avec le sweep low ~3290 et le reversal annonce dans la note. Le low du 6 isole est juste une etape de la cassure baissiere en cours, pas un pivot H4 propre. 1 swing capture le top avant l'annonce."
+}

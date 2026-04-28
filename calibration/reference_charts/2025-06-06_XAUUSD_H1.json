@@ -1,0 +1,32 @@
+{
+  "date": "2025-06-06",
+  "pair": "XAUUSD",
+  "timeframe": "H1",
+  "regime": "volatile_news",
+  "annotation_window_utc": {
+    "start": "2025-06-06T00:00:00Z",
+    "end": "2025-06-06T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-06-06T05:00:00Z",
+      "price": 3375.705,
+      "note": "top du jour pre-NFP, peak avant sell-off"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-06-06T20:00:00Z",
+      "price": 3307.195,
+      "note": "low intra-day post-NFP, -68 USD depuis le top"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-06-06T22:00:00Z",
+      "price": 3321.27,
+      "note": "rebond de fin de session, +14 USD depuis le low, dernier pivot avant sweep extreme du 7-8 juin"
+    }
+  ],
+  "annotator_confidence": "medium",
+  "annotation_notes": "NFP Friday avec sell-off massif. Pattern : top pre-NFP -> sell-off post-annonce (-68 USD) -> rebond marginal de fin de session. Le 3eme swing (high 22:00) est limite avec +14 USD au-dessus du low (juste sous seuil 30% du range journalier moyen) mais marque structurellement la fin du sell-off du 6 avant le sweep extreme ~3290 et le reversal du 7-8 juin (pattern annonce dans la note). Confidence medium pour le 3eme swing."
+}

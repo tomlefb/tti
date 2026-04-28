@@ -1,0 +1,32 @@
+{
+  "date": "2026-01-14",
+  "pair": "XAUUSD",
+  "timeframe": "H1",
+  "regime": "range",
+  "annotation_window_utc": {
+    "start": "2026-01-14T00:00:00Z",
+    "end": "2026-01-14T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2026-01-14T13:00:00Z",
+      "price": 4641.74,
+      "note": "premier top du range"
+    },
+    {
+      "type": "low",
+      "time_utc": "2026-01-14T15:00:00Z",
+      "price": 4599.5,
+      "note": "sweep down intermediaire, low du range"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-01-14T19:00:00Z",
+      "price": 4642.97,
+      "note": "double top mou, +1.23 USD au-dessus du first high"
+    }
+  ],
+  "annotator_confidence": "medium",
+  "annotation_notes": "Range mou avec double top quasi-identique (+1.23 USD entre les deux highs) et sweep down intermediaire. Structure faible mais amplitudes 42-43 USD au-dessus du seuil 30%. Pattern coherent avec un range au top avant cassure du 18 janvier. Confidence medium car la repetition des highs est dans le bruit structurel."
+}

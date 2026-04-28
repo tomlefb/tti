@@ -1,0 +1,26 @@
+{
+  "date": "2025-08-15",
+  "pair": "EURUSD",
+  "timeframe": "H1",
+  "regime": "dead",
+  "annotation_window_utc": {
+    "start": "2025-08-15T00:00:00Z",
+    "end": "2025-08-15T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2025-08-15T08:00:00Z",
+      "price": 1.16765,
+      "note": "low session europe, depart du leg bullish dans la journee"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-08-15T14:00:00Z",
+      "price": 1.17154,
+      "note": "top de session NY, peak du leg"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Journee classee dead mais en realite trending bullish modere. Range du 15 isole ~39 pips (58% du range journalier moyen ete 2025), au-dessus du seuil 30%. 2 swings clairs (low matin + high aprem). Le low du leg complet (1.16292) est sur le 14, hors fenetre."
+}

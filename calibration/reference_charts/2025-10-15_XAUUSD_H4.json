@@ -1,0 +1,26 @@
+{
+  "date": "2025-10-15",
+  "pair": "XAUUSD",
+  "timeframe": "H4",
+  "regime": "trending_bullish",
+  "annotation_window_utc": {
+    "start": "2025-10-15T00:00:00Z",
+    "end": "2025-10-15T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-10-15T08:00:00Z",
+      "price": 4218.405,
+      "note": "HH du rallye, top intra-day avant retracement"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-10-15T09:00:00Z",
+      "price": 4164.24,
+      "note": "HL post-HH, retracement avant reprise du rallye"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Plein milieu d'un rallye HH/HL propre. Le 15 capture un cycle HH (08:00) puis HL (09:00) avant que le rallye reprenne sur le 16. Internal moves entre les pivots ignores (non significatifs a cette echelle)."
+}

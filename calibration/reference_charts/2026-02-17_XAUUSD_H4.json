@@ -1,0 +1,32 @@
+{
+  "date": "2026-02-17",
+  "pair": "XAUUSD",
+  "timeframe": "H4",
+  "regime": "trending_bearish",
+  "annotation_window_utc": {
+    "start": "2026-02-17T00:00:00Z",
+    "end": "2026-02-17T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2026-02-17T05:00:00Z",
+      "price": 4859.2,
+      "note": "premier LL majeur, debut de la capitulation"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-02-17T12:00:00Z",
+      "price": 4944.7,
+      "note": "LH rebond intermediaire avant le 2eme leg de capitulation"
+    },
+    {
+      "type": "low",
+      "time_utc": "2026-02-17T14:00:00Z",
+      "price": 4842.6,
+      "note": "LL final, capitulation extreme, low du jour formant le bottom majeur"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Capitulation -155 USD formant un bottom majeur. En H4, 3 pivots structurels : double bottom (LL-LH-LL) capturant l'essence du mouvement. Les pivots intermediaires H1 (LL initial, LH final, HL CHOCH) sont noyes dans les candles H4 voisins. Le low 4842.600 est le pivot du retournement bullish des jours suivants."
+}

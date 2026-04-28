@@ -1,0 +1,26 @@
+{
+  "date": "2025-07-14",
+  "pair": "EURUSD",
+  "timeframe": "H4",
+  "regime": "dead",
+  "annotation_window_utc": {
+    "start": "2025-07-14T00:00:00Z",
+    "end": "2025-07-14T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-07-14T01:00:00Z",
+      "price": 1.16977,
+      "note": "top du range, premier candle H4 du jour"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-07-14T05:00:00Z",
+      "price": 1.16541,
+      "note": "low du range, sweep session europe"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Range serre ~44 pips sur la journee, 2 swings clairs (top initial puis low de session europe). Conforme regle 3 (dead = 0/1/2 swings)."
+}

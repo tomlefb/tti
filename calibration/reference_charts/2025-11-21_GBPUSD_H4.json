@@ -1,0 +1,32 @@
+{
+  "date": "2025-11-21",
+  "pair": "GBPUSD",
+  "timeframe": "H4",
+  "regime": "range",
+  "annotation_window_utc": {
+    "start": "2025-11-21T00:00:00Z",
+    "end": "2025-11-21T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-11-21T08:00:00Z",
+      "price": 1.31082,
+      "note": "premier top du range, resistance"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-11-21T12:00:00Z",
+      "price": 1.30383,
+      "note": "sweep mineur de liquidite basse, fakeout downward"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-11-21T21:00:00Z",
+      "price": 1.31082,
+      "note": "retour top du range, double top refusant la cassure"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Range au creux d'un sell-off avec sweep mineur en milieu de journee. Pattern double top encadrant un fakeout downward. Sweep de 70 pips (~75% du range journalier) typique d'une chasse de stops avant retour au range. 3 swings symetrique high-low-high."
+}

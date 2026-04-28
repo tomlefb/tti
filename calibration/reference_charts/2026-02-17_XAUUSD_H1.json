@@ -1,0 +1,56 @@
+{
+  "date": "2026-02-17",
+  "pair": "XAUUSD",
+  "timeframe": "H1",
+  "regime": "trending_bearish",
+  "annotation_window_utc": {
+    "start": "2026-02-17T00:00:00Z",
+    "end": "2026-02-17T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2026-02-17T01:00:00Z",
+      "price": 4922.895,
+      "note": "LL initial, premier point bas de la nuit"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-02-17T03:00:00Z",
+      "price": 4970.215,
+      "note": "LH rebond technique avant 1er leg de capitulation"
+    },
+    {
+      "type": "low",
+      "time_utc": "2026-02-17T05:00:00Z",
+      "price": 4859.2,
+      "note": "LL 1er leg de capitulation"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-02-17T12:00:00Z",
+      "price": 4944.7,
+      "note": "LH rebond intermediaire avant 2eme leg"
+    },
+    {
+      "type": "low",
+      "time_utc": "2026-02-17T14:00:00Z",
+      "price": 4842.6,
+      "note": "LL final, capitulation extreme, low du jour formant le bottom majeur"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-02-17T18:00:00Z",
+      "price": 4910.9,
+      "note": "LH rebond post-capitulation, debut de la formation CHOCH"
+    },
+    {
+      "type": "low",
+      "time_utc": "2026-02-17T23:00:00Z",
+      "price": 4854.24,
+      "note": "HL au-dessus du LL de 14:00 (+11.64 USD), signature CHOCH = retournement bullish anticipe"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Capitulation -155 USD textbook avec retournement intra-day. Sequence complete LL-LH-LL-LH-LL-LH-HL : double leg de capitulation (5h puis 14h) suivi d'un CHOCH par HL final (23:00 a +11.64 USD au-dessus du LL bottom). Pattern critique pour la strategie : le HL final marque le pivot avant retournement bullish des jours suivants. 7 swings capturent toute la sequence, similaire au 4 novembre."
+}

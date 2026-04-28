@@ -1,0 +1,44 @@
+{
+  "date": "2026-01-28",
+  "pair": "NDX100",
+  "timeframe": "H1",
+  "regime": "volatile_news",
+  "annotation_window_utc": {
+    "start": "2026-01-28T00:00:00Z",
+    "end": "2026-01-28T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2026-01-28T03:00:00Z",
+      "price": 26068.46,
+      "note": "HL initial, debut de la compression pre-FOMC"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-01-28T06:00:00Z",
+      "price": 26224.21,
+      "note": "HH peak pre-FOMC, top du jour"
+    },
+    {
+      "type": "low",
+      "time_utc": "2026-01-28T16:00:00Z",
+      "price": 25976.66,
+      "note": "FAKE LL post-annonce, premier sweep down"
+    },
+    {
+      "type": "low",
+      "time_utc": "2026-01-28T21:00:00Z",
+      "price": 25873.96,
+      "note": "vrai LL, sweep ultime sous le fake LL, low du jour"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-01-28T23:00:00Z",
+      "price": 26171.32,
+      "note": "LH retracement post-sweep, dernier rebond avant bearish massif"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "FOMC janvier textbook avec double sweep : compression HL-HH pre-FOMC -> fake LL post-annonce (16:00) -> vrai LL ultimate (21:00) -> retracement LH (23:00). Pattern fake-move + sweep ultime classique. Le LH final est suivi d'un sell-off massif les jours suivants (top majeur confirme). 5 swings capturent toute la sequence."
+}

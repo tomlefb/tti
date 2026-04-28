@@ -1,0 +1,38 @@
+{
+  "date": "2025-07-03",
+  "pair": "EURUSD",
+  "timeframe": "H1",
+  "regime": "trending_bearish",
+  "annotation_window_utc": {
+    "start": "2025-07-03T00:00:00Z",
+    "end": "2025-07-03T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-07-03T01:00:00Z",
+      "price": 1.18101,
+      "note": "top du jour, pivot du top global"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-07-03T09:00:00Z",
+      "price": 1.17168,
+      "note": "low de la chute matin"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-07-03T14:00:00Z",
+      "price": 1.17896,
+      "note": "rebond de session NY, LH confirmant la structure bearish"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-07-03T19:00:00Z",
+      "price": 1.17443,
+      "note": "re-test bearish post-NY, LL final"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Structure complete H1 du sell-off : top -> chute -> rebond LH -> retracement LL. 4 swings, toutes amplitudes au-dessus du seuil 30%. Pattern zigzag bearish typique d'un trending day."
+}

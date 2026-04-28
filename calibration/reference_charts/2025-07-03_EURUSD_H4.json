@@ -1,0 +1,26 @@
+{
+  "date": "2025-07-03",
+  "pair": "EURUSD",
+  "timeframe": "H4",
+  "regime": "trending_bearish",
+  "annotation_window_utc": {
+    "start": "2025-07-03T00:00:00Z",
+    "end": "2025-07-03T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-07-03T01:00:00Z",
+      "price": 1.18101,
+      "note": "top du jour, pivot du top global avant 4 juillet US"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-07-03T09:00:00Z",
+      "price": 1.17168,
+      "note": "low de la chute principale, -93 pips depuis le top"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Journee pivot du top : sell-off propre de -93 pips (133% du range journalier moyen). Le high de 01:00 marque le peak avant la cassure, le low de 09:00 est le bottom de la chute matin. Regime trending_bearish parfaitement verifie."
+}

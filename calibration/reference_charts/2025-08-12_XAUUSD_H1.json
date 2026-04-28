@@ -1,0 +1,26 @@
+{
+  "date": "2025-08-12",
+  "pair": "XAUUSD",
+  "timeframe": "H1",
+  "regime": "dead",
+  "annotation_window_utc": {
+    "start": "2025-08-12T00:00:00Z",
+    "end": "2025-08-12T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-08-12T07:00:00Z",
+      "price": 3358.25,
+      "note": "top de range, session asia/early europe"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-08-12T14:00:00Z",
+      "price": 3331.17,
+      "note": "low de session US, bottom du range"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Range ~27 USD sur la journee, 2 pivots clairs (top initial puis low US). Amplitude au-dessus du seuil 30% du range journalier moyen. Conforme regle 3 (dead = 0/1/2 swings)."
+}

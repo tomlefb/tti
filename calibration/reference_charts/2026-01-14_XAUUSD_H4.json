@@ -1,0 +1,20 @@
+{
+  "date": "2026-01-14",
+  "pair": "XAUUSD",
+  "timeframe": "H4",
+  "regime": "range",
+  "annotation_window_utc": {
+    "start": "2026-01-14T00:00:00Z",
+    "end": "2026-01-14T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2026-01-14T13:00:00Z",
+      "price": 4641.74,
+      "note": "top du range avant cassure du 18 janvier"
+    }
+  ],
+  "annotator_confidence": "medium",
+  "annotation_notes": "Range mou au top avant cassure. En H4, seul le high de 13:00 est un pivot significatif dans la fenetre. Le low intermediaire et le re-test du high sont noyes dans la structure H4 ou hors fenetre. 1 swing capture le top du range."
+}

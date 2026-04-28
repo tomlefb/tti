@@ -1,0 +1,32 @@
+{
+  "date": "2025-12-23",
+  "pair": "EURUSD",
+  "timeframe": "H1",
+  "regime": "trending_bullish",
+  "annotation_window_utc": {
+    "start": "2025-12-23T00:00:00Z",
+    "end": "2025-12-23T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2025-12-23T06:00:00Z",
+      "price": 1.17685,
+      "note": "low matin, debut du leg final du rallye"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-12-23T12:00:00Z",
+      "price": 1.18021,
+      "note": "peak du rallye, sweep haussier midi"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-12-23T15:00:00Z",
+      "price": 1.17639,
+      "note": "low post-peak, sweep baissier puis stabilisation"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Pattern sweep bidirectionnel typique de periode illiquide (veille de Noel) : break par dessus (peak rallye) puis break par dessous avant retournement bearish des jours suivants. 3 swings H1 capturent la sequence low-high-low."
+}

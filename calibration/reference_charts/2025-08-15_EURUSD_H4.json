@@ -1,0 +1,20 @@
+{
+  "date": "2025-08-15",
+  "pair": "EURUSD",
+  "timeframe": "H4",
+  "regime": "dead",
+  "annotation_window_utc": {
+    "start": "2025-08-15T00:00:00Z",
+    "end": "2025-08-15T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-08-15T21:00:00Z",
+      "price": 1.17152,
+      "note": "top du leg bullish de la journee"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Journee classee dead mais en realite trending bullish modere (~39 pips low-to-high dans la fenetre du 15). Le low du leg bullish est sur le 14 aout (hors fenetre), donc seul le high de fin de journee est marque en H4. 1 swing = conforme regle 3."
+}

@@ -1,0 +1,32 @@
+{
+  "date": "2026-01-02",
+  "pair": "EURUSD",
+  "timeframe": "H4",
+  "regime": "range",
+  "annotation_window_utc": {
+    "start": "2026-01-02T00:00:00Z",
+    "end": "2026-01-02T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2026-01-02T07:00:00Z",
+      "price": 1.1747,
+      "note": "premier top du range"
+    },
+    {
+      "type": "low",
+      "time_utc": "2026-01-02T10:00:00Z",
+      "price": 1.17131,
+      "note": "sweep down, liquidity grab des stops bas"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-01-02T16:00:00Z",
+      "price": 1.17545,
+      "note": "retour top + leger break du first high (liquidity grab haut), pivot avant cassure"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Range au top avant cassure baissiere. Pattern bookend liquidity grab : sweep down (10:00) puis re-test high avec leger break (16:00) attrapant stops des deux cotes avant cassure baissiere des jours suivants. 3 swings symetriques high-low-high."
+}

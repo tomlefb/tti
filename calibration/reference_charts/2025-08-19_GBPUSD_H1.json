@@ -1,0 +1,26 @@
+{
+  "date": "2025-08-19",
+  "pair": "GBPUSD",
+  "timeframe": "H1",
+  "regime": "trending_bearish",
+  "annotation_window_utc": {
+    "start": "2025-08-19T00:00:00Z",
+    "end": "2025-08-19T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2025-08-19T01:00:00Z",
+      "price": 1.34866,
+      "note": "low de la nuit, bas avant rebond technique matin"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-08-19T09:00:00Z",
+      "price": 1.35311,
+      "note": "LH du sell-off, top du rebond technique"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "2e jour de sell-off propre, structure LH nette. 2 swings capturent le rebond technique du matin (low nuit -> high 09:00). Le low de fin de journee n'est pas marque car il se prolonge sur le 20 aout, donc pas de pivot H1 final dans la fenetre."
+}

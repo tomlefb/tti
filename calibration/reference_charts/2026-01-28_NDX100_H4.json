@@ -1,0 +1,32 @@
+{
+  "date": "2026-01-28",
+  "pair": "NDX100",
+  "timeframe": "H4",
+  "regime": "volatile_news",
+  "annotation_window_utc": {
+    "start": "2026-01-28T00:00:00Z",
+    "end": "2026-01-28T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2026-01-28T06:00:00Z",
+      "price": 26224.21,
+      "note": "HH peak pre-FOMC, top du jour"
+    },
+    {
+      "type": "low",
+      "time_utc": "2026-01-28T21:00:00Z",
+      "price": 25873.96,
+      "note": "LL vrai sweep post-FOMC, low du jour"
+    },
+    {
+      "type": "high",
+      "time_utc": "2026-01-28T23:00:00Z",
+      "price": 26171.32,
+      "note": "LH retracement post-sweep, dernier rebond avant bearish massif"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "FOMC janvier, top majeur. En H4, 3 pivots structurels capturent le pattern : peak pre-FOMC -> sweep ultime -> retracement. Le HL initial (03:00) et le fake LL (16:00) sont noyes dans les candles H4 voisins et ne forment pas de pivot H4 distinct. Sell-off massif les jours suivants (chart -> 25500 zone)."
+}

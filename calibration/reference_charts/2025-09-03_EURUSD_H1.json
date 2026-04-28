@@ -1,0 +1,38 @@
+{
+  "date": "2025-09-03",
+  "pair": "EURUSD",
+  "timeframe": "H1",
+  "regime": "trending_bullish",
+  "annotation_window_utc": {
+    "start": "2025-09-03T00:00:00Z",
+    "end": "2025-09-03T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "low",
+      "time_utc": "2025-09-03T05:00:00Z",
+      "price": 1.16081,
+      "note": "bottom du jour, low session early europe"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-09-03T09:00:00Z",
+      "price": 1.16647,
+      "note": "swing high intermediaire post-rebond"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-09-03T10:00:00Z",
+      "price": 1.16396,
+      "note": "HL retracement sur le leg bullish"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-09-03T13:00:00Z",
+      "price": 1.1682,
+      "note": "top du leg bullish, peak du jour"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Date BONUS hors liste initiale. Structure en zigzag bullish complete : low matin -> rebond -> retracement HL -> top final. 4 swings H1, toutes amplitudes au-dessus du seuil 30%."
+}

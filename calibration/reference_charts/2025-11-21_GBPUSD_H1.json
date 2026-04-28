@@ -1,0 +1,32 @@
+{
+  "date": "2025-11-21",
+  "pair": "GBPUSD",
+  "timeframe": "H1",
+  "regime": "range",
+  "annotation_window_utc": {
+    "start": "2025-11-21T00:00:00Z",
+    "end": "2025-11-21T23:59:59Z"
+  },
+  "swings": [
+    {
+      "type": "high",
+      "time_utc": "2025-11-21T08:00:00Z",
+      "price": 1.31082,
+      "note": "premier top du range, resistance"
+    },
+    {
+      "type": "low",
+      "time_utc": "2025-11-21T12:00:00Z",
+      "price": 1.30383,
+      "note": "sweep mineur de liquidite basse, fakeout downward"
+    },
+    {
+      "type": "high",
+      "time_utc": "2025-11-21T21:00:00Z",
+      "price": 1.31082,
+      "note": "retour top du range, double top refusant la cassure"
+    }
+  ],
+  "annotator_confidence": "high",
+  "annotation_notes": "Memes pivots structurels qu'en H4 (sweep majeur de 70 pips capte le mouvement complet, pas de micro-pivots H1 significatifs entre les extremes). Pattern range-with-sweep parfait."
+}
