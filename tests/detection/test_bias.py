@@ -175,8 +175,10 @@ def test_compute_daily_bias_bullish_when_both_agree() -> None:
         df_h1=df,
         swing_lookback_h4=2,
         swing_lookback_h1=2,
-        min_amplitude_atr_mult=0.0,  # accept everything for the test
+        min_amplitude_atr_mult_h4=0.0,  # accept everything for the test
+        min_amplitude_atr_mult_h1=0.0,
         bias_swing_count=4,
+        require_h1_confirmation=True,  # legacy intersection mode
         atr_period=14,
     )
     assert bias == "bullish"
@@ -189,14 +191,17 @@ def test_compute_daily_bias_bearish_when_both_agree() -> None:
         df_h1=df,
         swing_lookback_h4=2,
         swing_lookback_h1=2,
-        min_amplitude_atr_mult=0.0,
+        min_amplitude_atr_mult_h4=0.0,
+        min_amplitude_atr_mult_h1=0.0,
         bias_swing_count=4,
+        require_h1_confirmation=True,
         atr_period=14,
     )
     assert bias == "bearish"
 
 
 def test_compute_daily_bias_no_trade_when_disagree() -> None:
+    """Sprint 1 legacy intersection mode: H4 and H1 must agree."""
     up = _trending_up_ohlc(80)
     down = _trending_down_ohlc(80)
     bias = compute_daily_bias(
@@ -204,8 +209,29 @@ def test_compute_daily_bias_no_trade_when_disagree() -> None:
         df_h1=down,
         swing_lookback_h4=2,
         swing_lookback_h1=2,
-        min_amplitude_atr_mult=0.0,
+        min_amplitude_atr_mult_h4=0.0,
+        min_amplitude_atr_mult_h1=0.0,
         bias_swing_count=4,
+        require_h1_confirmation=True,
         atr_period=14,
     )
     assert bias == "no_trade"
+
+
+def test_compute_daily_bias_h4_only_default_ignores_h1() -> None:
+    """Sprint 3 default (require_h1_confirmation=False): H1 disagreement
+    does not block H4's call."""
+    up = _trending_up_ohlc(80)
+    down = _trending_down_ohlc(80)
+    bias = compute_daily_bias(
+        df_h4=up,
+        df_h1=down,  # disagreeing H1 — should be ignored
+        swing_lookback_h4=2,
+        swing_lookback_h1=2,
+        min_amplitude_atr_mult_h4=0.0,
+        min_amplitude_atr_mult_h1=0.0,
+        bias_swing_count=4,
+        # require_h1_confirmation defaults to False
+        atr_period=14,
+    )
+    assert bias == "bullish"

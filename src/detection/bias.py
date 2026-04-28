@@ -102,28 +102,43 @@ def compute_timeframe_bias(swings: pd.DataFrame, bias_swing_count: int) -> Bias:
 def compute_daily_bias(
     df_h4: pd.DataFrame,
     df_h1: pd.DataFrame,
+    *,
     swing_lookback_h4: int,
     swing_lookback_h1: int,
-    min_amplitude_atr_mult: float,
+    min_amplitude_atr_mult_h4: float,
+    min_amplitude_atr_mult_h1: float,
     bias_swing_count: int,
+    require_h1_confirmation: bool = False,
     atr_period: int = 14,
 ) -> Bias:
-    """Compute the final daily bias by requiring H4 and H1 agreement.
+    """Compute the daily bias.
 
-    Runs ``find_swings`` on each timeframe, then ``compute_timeframe_bias``,
-    then combines:
+    By default (``require_h1_confirmation=False``) the bias is determined
+    by H4 structure alone — H1 swings are not consulted. Set the flag to
+    ``True`` to require H4 AND H1 agreement (Sprint 1's original behaviour).
 
-    - ``"bullish"`` if H4 and H1 are both bullish.
-    - ``"bearish"`` if H4 and H1 are both bearish.
-    - ``"no_trade"`` otherwise.
+    Sprint 3 rationale (see ``calibration/runs/FINAL_swing_calibration.md``
+    Sprint 3 amendment, plus the diagnostic dive on XAUUSD 2025-10-15):
+    H1 swings exhibit lower-order geometric pivots (P=42%, R=75%, F1≈54%
+    against operator annotations) which do not represent tradeable major
+    liquidity. Empirically, H1 disagreement on clean trending days
+    sabotages valid bias signals — e.g. XAUUSD 2025-10-15 has H4 calling
+    the day correctly bullish but H1 inserting a noise-driven LL that
+    flips H1 bias to no_trade, killing the H4∩H1 intersection.
+
+    Per docs/07 §1.2 / §1.3 this is a heuristic decision, not a free
+    parameter — the legacy mode is preserved behind the flag.
 
     Args:
         df_h4: H4 OHLC frame.
         df_h1: H1 OHLC frame.
         swing_lookback_h4: ``SWING_LOOKBACK_H4`` from settings.
         swing_lookback_h1: ``SWING_LOOKBACK_H1`` from settings.
-        min_amplitude_atr_mult: ``MIN_SWING_AMPLITUDE_ATR_MULT`` from settings.
+        min_amplitude_atr_mult_h4: ``MIN_SWING_AMPLITUDE_ATR_MULT_H4``.
+        min_amplitude_atr_mult_h1: ``MIN_SWING_AMPLITUDE_ATR_MULT_H1``.
         bias_swing_count: ``BIAS_SWING_COUNT`` from settings.
+        require_h1_confirmation: ``BIAS_REQUIRE_H1_CONFIRMATION`` —
+            ``False`` (Sprint 3 default) ⇒ H4 alone; ``True`` ⇒ H4 ∧ H1.
         atr_period: ATR window used by the amplitude filter (default 14).
 
     Returns:
@@ -132,18 +147,24 @@ def compute_daily_bias(
     swings_h4 = find_swings(
         df_h4,
         lookback=swing_lookback_h4,
-        min_amplitude_atr_mult=min_amplitude_atr_mult,
-        atr_period=atr_period,
-    )
-    swings_h1 = find_swings(
-        df_h1,
-        lookback=swing_lookback_h1,
-        min_amplitude_atr_mult=min_amplitude_atr_mult,
+        min_amplitude_atr_mult=min_amplitude_atr_mult_h4,
         atr_period=atr_period,
     )
     bias_h4 = compute_timeframe_bias(swings_h4, bias_swing_count)
-    bias_h1 = compute_timeframe_bias(swings_h1, bias_swing_count)
 
+    if not require_h1_confirmation:
+        # H4-only mode (Sprint 3 default). Returns H4's own classification
+        # — including ``no_trade`` when H4 itself doesn't have a clean
+        # HH/HL or LH/LL pattern.
+        return bias_h4
+
+    swings_h1 = find_swings(
+        df_h1,
+        lookback=swing_lookback_h1,
+        min_amplitude_atr_mult=min_amplitude_atr_mult_h1,
+        atr_period=atr_period,
+    )
+    bias_h1 = compute_timeframe_bias(swings_h1, bias_swing_count)
     if bias_h4 == "bullish" and bias_h1 == "bullish":
         return "bullish"
     if bias_h4 == "bearish" and bias_h1 == "bearish":

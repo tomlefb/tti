@@ -569,7 +569,8 @@ def main() -> int:
     config_used = {
         "SWING_LOOKBACK_H4": settings.SWING_LOOKBACK_H4,
         "SWING_LOOKBACK_H1": settings.SWING_LOOKBACK_H1,
-        "MIN_SWING_AMPLITUDE_ATR_MULT": settings.MIN_SWING_AMPLITUDE_ATR_MULT,
+        "MIN_SWING_AMPLITUDE_ATR_MULT_H4": settings.MIN_SWING_AMPLITUDE_ATR_MULT_H4,
+        "MIN_SWING_AMPLITUDE_ATR_MULT_H1": settings.MIN_SWING_AMPLITUDE_ATR_MULT_H1,
         "BIAS_SWING_COUNT": settings.BIAS_SWING_COUNT,
         "ATR_PERIOD": 14,
     }
@@ -587,12 +588,17 @@ def main() -> int:
         lookback = (
             settings.SWING_LOOKBACK_H4 if ann.timeframe == "H4" else settings.SWING_LOOKBACK_H1
         )
+        atr_mult = (
+            settings.MIN_SWING_AMPLITUDE_ATR_MULT_H4
+            if ann.timeframe == "H4"
+            else settings.MIN_SWING_AMPLITUDE_ATR_MULT_H1
+        )
         detected = _detected_swings_in_window(
             df,
             ann.window_start,
             ann.window_end,
             lookback=lookback,
-            atr_mult=settings.MIN_SWING_AMPLITUDE_ATR_MULT,
+            atr_mult=atr_mult,
             atr_period=14,
         )
         tp, fp, fn, fps, fns = _match(detected, ann.swings, ann.timeframe)

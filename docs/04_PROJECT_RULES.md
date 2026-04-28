@@ -177,8 +177,11 @@ If a key is renamed, update this table first, then code, then docs.
 | `SWING_LOOKBACK_H4` | `int` | Candles each side that must be lower (high) / higher (low) on H4. |
 | `SWING_LOOKBACK_H1` | `int` | Same on H1. |
 | `SWING_LOOKBACK_M5` | `int` | Same on M5. |
-| `MIN_SWING_AMPLITUDE_ATR_MULT` | `float` | Min distance to prev opposite-type swing as multiple of ATR(14). |
+| `MIN_SWING_AMPLITUDE_ATR_MULT_H4` | `float` | Min distance on H4 to prev opposite-type H4 swing as multiple of ATR(14) on H4. |
+| `MIN_SWING_AMPLITUDE_ATR_MULT_H1` | `float` | Same on H1. |
+| `MIN_SWING_AMPLITUDE_ATR_MULT_M5` | `float` | Same on M5 (used by `detect_mss`'s significant-swing pass). |
 | `BIAS_SWING_COUNT` | `int` | Number of significant swings considered when computing daily bias. |
+| `BIAS_REQUIRE_H1_CONFIRMATION` | `bool` | `False` (Sprint 3 default): H4 alone determines bias. `True` (legacy): H4 ∧ H1 must agree. |
 
 ### Multi-TF confluence (Sprint 2 — calibrated heuristic)
 
@@ -193,6 +196,8 @@ If a key is renamed, update this table first, then code, then docs.
 | Key | Type | Meaning |
 |---|---|---|
 | `SWEEP_RETURN_WINDOW_CANDLES` | `int` | Candles after the wick during which the close must return back across the swept level. |
+| `SWEEP_DEDUP_TIME_WINDOW_MINUTES` | `int` | Time window (minutes) within which same-direction, same-level sweeps are collapsed to the deepest one. Sprint 3 heuristic. |
+| `SWEEP_DEDUP_PRICE_TOLERANCE_FRACTION` | `float` | Relative price tolerance for the same dedup; symmetric `\|p1 − p2\| ≤ tol × (\|p1\| + \|p2\|) / 2`. |
 
 ### MSS (calibrated)
 
@@ -214,6 +219,7 @@ If a key is renamed, update this table first, then code, then docs.
 |---|---|---|
 | `MIN_RR` | `float` | Minimum risk-reward ratio for a setup to qualify. |
 | `A_PLUS_RR_THRESHOLD` | `float` | RR at or above which grading may upgrade to `A+`. |
+| `PARTIAL_TP_RR_TARGET` | `float` | RR cap for the partial-exit TP1. When `tp_runner_rr` exceeds this, `tp1_*` is clamped to entry ± `PARTIAL_TP_RR_TARGET` × risk. |
 
 ### Per-instrument (`INSTRUMENT_CONFIG[symbol]` dict)
 

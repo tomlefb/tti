@@ -97,16 +97,38 @@ calibrated.
 
 Deliverables:
 
-- [ ] Sweep deduplication — multiple M5 candles sweeping the same level
+- [x] Sweep deduplication — multiple M5 candles sweeping the same level
       within a short window must collapse to a single sweep event for
-      downstream consumption.
-- [ ] `src/detection/mss.py` with calibrated displacement filter
-- [ ] `src/detection/fvg.py` with ATR-based size filter
-- [ ] `src/detection/order_block.py` (fallback POI)
-- [ ] `src/detection/setup.py` orchestrator
-- [ ] `src/detection/grading.py` for A+/A/B (heuristic)
-- [ ] Unit + integration tests
-- [ ] **Calibration**: displacement multiplier and FVG size threshold tuned
+      downstream consumption. (`deduplicate_sweeps` in `sweep.py`,
+      union-find clustering on direction + time window + symmetric
+      relative price tolerance; integrated into `detect_sweeps(dedupe=True)`.)
+- [x] `src/detection/mss.py` with calibrated displacement filter
+      (defaults `MSS_DISPLACEMENT_MULTIPLIER=1.5`,
+      `MSS_DISPLACEMENT_LOOKBACK=20` — kept until calibration data drives
+      a tuning pass).
+- [x] `src/detection/fvg.py` with ATR-based size filter
+      (`FVG_MIN_SIZE_ATR_MULTIPLIER=0.3`, `FVG_ATR_PERIOD=14`).
+- [x] `src/detection/order_block.py` (fallback POI; 20-candle bounded
+      look-back).
+- [x] `src/detection/setup.py` orchestrator (`build_setup_candidates`,
+      bias re-locked per-killzone, `SetupSettings` Protocol, full
+      pipeline with TP nearest-≥-MIN_RR selection).
+- [x] `src/detection/grading.py` for A+/A/B (heuristic stack with
+      defensive displacement re-check).
+- [x] Unit + integration tests
+      (`test_sweep_dedup`, `test_mss`, `test_fvg`, `test_order_block`,
+      `test_setup`, `test_grading`, `test_setup_integration`).
+- [x] **Calibration**: amplitude split per-TF (`MIN_SWING_AMPLITUDE_ATR_MULT_H4=1.3`
+      from grid search; H1=1.0 unchanged from Sprint 1; M5=1.0). Bias became
+      H4-only by default (`BIAS_REQUIRE_H1_CONFIRMATION=False`) after the
+      diagnostic dive on 2025-10-15 XAUUSD identified H1 noise as the dominant
+      bias-killer. `PARTIAL_TP_RR_TARGET=5.0` added for the TP1 partial-exit
+      mechanism on high-RR runners. Calibration of `MSS_DISPLACEMENT_MULTIPLIER`
+      and `FVG_MIN_SIZE_ATR_MULTIPLIER` deferred — defaults proved adequate
+      on integration test (16 setups, balanced distribution, no bottleneck
+      identified at MSS or FVG stage in cascade). See
+      `calibration/runs/FINAL_sprint3_calibration.md`.
+- [x] CLI script (`scripts/print_setups_for_day.py`).
 
 **Done when**: running the orchestrator on a historical day produces a list
 of detected setups that the operator can review; at least 70% are confirmed
@@ -120,6 +142,15 @@ as valid by operator manual review.
 
 Deliverables:
 
+- [ ] **Notification format**: TP1 (5R partial) and TP_runner (full RR)
+      distinct, with `high_rr_runner` confluence flagged for tradability
+      (extended-leg setups → emphasise scaling out at TP1).
+- [ ] **Killzone gating**: filter setups whose `timestamp_utc` (MSS confirm
+      time) falls outside the London/NY killzone end. Per docs/01 §6,
+      notifications must not fire outside killzones even if the detection
+      pipeline produces them. Decision: filter at notification time, not
+      detection time — keeps the orchestrator's Setup output complete and
+      auditable for backtests, while the notifier enforces the live rule.
 - [ ] `src/notification/chart_renderer.py` produces annotated PNGs
 - [ ] `src/notification/message_formatter.py` builds the text summary
 - [ ] `src/notification/telegram_bot.py` sends + handles inline button callbacks
@@ -187,12 +218,11 @@ without this layer and document the negative result.
 
 ## Current state
 
-- **Active sprint**: 3
-- **Last updated**: Sprint 2 closed 2026-04-28; liquidity marking + sweep
-  detection on M5 shipped (1270 sweeps detected on 18 reference dates,
-  spot-check validated). NY killzone capped at 18:00 Paris by design
-  (FOMC at 20:00 Paris out of scope). Sprint 3 ready: MSS + FVG + setup
-  orchestrator + grading.
+- **Active sprint**: 4
+- **Last updated**: Sprint 3 closed 2026-04-28; setup orchestrator + MSS +
+  FVG + OB + grading shipped. 16 setups detected on 18 reference dates × 4
+  pairs (5 A + 11 B). H4 amplitude tightened to 1.3, bias became H4-only
+  by default. TP1 partial-exit at 5R + TP_runner free RR. Sprint 4 ready.
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.

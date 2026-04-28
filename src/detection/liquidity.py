@@ -273,7 +273,8 @@ def mark_swing_levels(
     *,
     lookback_h4: int,
     lookback_h1: int,
-    min_amplitude_atr_mult: float,
+    min_amplitude_atr_mult_h4: float,
+    min_amplitude_atr_mult_h1: float,
     n_swings: int = 5,
     h4_h1_time_tolerance_h4_candles: int = 2,
     h4_h1_price_tolerance_fraction: float = 0.001,
@@ -303,7 +304,8 @@ def mark_swing_levels(
         df_h1: H1 OHLC frame.
         as_of_utc: cutoff; future swings are dropped.
         lookback_h4 / lookback_h1: fractal lookback per timeframe.
-        min_amplitude_atr_mult: ATR-amplitude filter multiplier.
+        min_amplitude_atr_mult_h4: ATR-amplitude filter multiplier on H4.
+        min_amplitude_atr_mult_h1: ATR-amplitude filter multiplier on H1.
         n_swings: how many trailing H4 swings to consider.
         h4_h1_time_tolerance_h4_candles: matching window in H4 candles.
         h4_h1_price_tolerance_fraction: matching window in price (fraction).
@@ -315,13 +317,13 @@ def mark_swing_levels(
     swings_h4 = find_swings(
         df_h4,
         lookback=lookback_h4,
-        min_amplitude_atr_mult=min_amplitude_atr_mult,
+        min_amplitude_atr_mult=min_amplitude_atr_mult_h4,
         atr_period=atr_period,
     )
     swings_h1 = find_swings(
         df_h1,
         lookback=lookback_h1,
-        min_amplitude_atr_mult=min_amplitude_atr_mult,
+        min_amplitude_atr_mult=min_amplitude_atr_mult_h1,
         atr_period=atr_period,
     )
 

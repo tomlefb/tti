@@ -32,7 +32,8 @@ from src.detection.swings import find_swings
 # config.settings imports config.secrets (gitignored).
 _SWING_LOOKBACK_H4 = 2
 _SWING_LOOKBACK_H1 = 2
-_MIN_SWING_AMPLITUDE_ATR_MULT = 0.5
+_MIN_SWING_AMPLITUDE_ATR_MULT_H4 = 0.5
+_MIN_SWING_AMPLITUDE_ATR_MULT_H1 = 0.5
 _BIAS_SWING_COUNT = 4
 _ATR_PERIOD = 14
 
@@ -57,7 +58,9 @@ def test_find_swings_runs_on_fixtures(symbol: str, tf: str, lookback: int) -> No
     swings = find_swings(
         df,
         lookback=lookback,
-        min_amplitude_atr_mult=_MIN_SWING_AMPLITUDE_ATR_MULT,
+        min_amplitude_atr_mult=(
+            _MIN_SWING_AMPLITUDE_ATR_MULT_H4 if tf == "H4" else _MIN_SWING_AMPLITUDE_ATR_MULT_H1
+        ),
         atr_period=_ATR_PERIOD,
     )
 
@@ -106,7 +109,7 @@ def test_compute_timeframe_bias_returns_valid_label(symbol: str) -> None:
     swings = find_swings(
         df_h4,
         lookback=_SWING_LOOKBACK_H4,
-        min_amplitude_atr_mult=_MIN_SWING_AMPLITUDE_ATR_MULT,
+        min_amplitude_atr_mult=_MIN_SWING_AMPLITUDE_ATR_MULT_H4,
         atr_period=_ATR_PERIOD,
     )
     bias = compute_timeframe_bias(swings, _BIAS_SWING_COUNT)
@@ -122,7 +125,8 @@ def test_compute_daily_bias_runs_end_to_end(symbol: str) -> None:
         df_h1=df_h1,
         swing_lookback_h4=_SWING_LOOKBACK_H4,
         swing_lookback_h1=_SWING_LOOKBACK_H1,
-        min_amplitude_atr_mult=_MIN_SWING_AMPLITUDE_ATR_MULT,
+        min_amplitude_atr_mult_h4=_MIN_SWING_AMPLITUDE_ATR_MULT_H4,
+        min_amplitude_atr_mult_h1=_MIN_SWING_AMPLITUDE_ATR_MULT_H1,
         bias_swing_count=_BIAS_SWING_COUNT,
         atr_period=_ATR_PERIOD,
     )

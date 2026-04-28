@@ -17,7 +17,7 @@ filtering belongs in ``setup.py``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 import pandas as pd
@@ -52,6 +52,9 @@ def detect_sweeps(
     *,
     sweep_buffer: float,
     return_window_candles: int,
+    dedupe: bool = True,
+    dedupe_time_window_minutes: int = 30,
+    dedupe_price_tolerance_fraction: float = 0.001,
 ) -> list[Sweep]:
     """Detect every sweep that occurs inside ``killzone_window_utc``.
 
@@ -80,6 +83,15 @@ def detect_sweeps(
         return_window_candles: ``SWEEP_RETURN_WINDOW_CANDLES``. Total
             candles checked = ``return_window_candles + 1`` (current
             candle plus this many lookahead candles).
+        dedupe: when ``True`` (default), collapse near-duplicate sweeps via
+            ``deduplicate_sweeps`` before returning. Sprint 2 closing note
+            recommended this — without it, downstream MSS/FVG detection
+            re-runs on dozens of essentially identical sweep events per
+            killzone.
+        dedupe_time_window_minutes: ``SWEEP_DEDUP_TIME_WINDOW_MINUTES``;
+            forwarded to ``deduplicate_sweeps``.
+        dedupe_price_tolerance_fraction: ``SWEEP_DEDUP_PRICE_TOLERANCE_FRACTION``;
+            forwarded to ``deduplicate_sweeps``.
 
     Returns:
         ``list[Sweep]`` ordered by ``sweep_candle_time_utc`` ascending.
@@ -156,7 +168,119 @@ def detect_sweeps(
                         )
 
     sweeps.sort(key=lambda s: s.sweep_candle_time_utc)
+    if dedupe:
+        sweeps = deduplicate_sweeps(
+            sweeps,
+            time_window_minutes=dedupe_time_window_minutes,
+            price_tolerance_fraction=dedupe_price_tolerance_fraction,
+        )
     return sweeps
+
+
+def deduplicate_sweeps(
+    sweeps: list[Sweep],
+    time_window_minutes: int = 30,
+    price_tolerance_fraction: float = 0.001,
+) -> list[Sweep]:
+    """Collapse multiple ``Sweep`` objects describing the same structural event.
+
+    Two sweeps are considered duplicates iff:
+
+    - same ``direction`` (bullish/bullish or bearish/bearish), AND
+    - their ``swept_level_price`` differ by no more than
+      ``price_tolerance_fraction × (|p1| + |p2|) / 2`` — symmetric form,
+      see note below, AND
+    - their ``sweep_candle_time_utc`` differ by no more than
+      ``time_window_minutes`` minutes.
+
+    The relation is grouped via union-find: A~B and B~C ⇒ A, B, C all
+    in the same cluster, even if A and C alone fall outside the time
+    window. Within each cluster the **largest-excursion** sweep is kept
+    (the deepest sweep — most likely to have grabbed the most liquidity);
+    ties are broken by earliest ``sweep_candle_time_utc``.
+
+    Returned list is sorted by ``sweep_candle_time_utc`` ascending.
+
+    Heuristic per docs/07 §1.3. Defaults rationale:
+
+    - 30-minute window: covers most multi-touch sweep events on M5 within
+      a single killzone phase. Alternatives: per-killzone-phase grouping
+      (cleaner cut but loses fine-grained intra-phase events), or
+      excursion-weighted clustering (more complex, marginal gain).
+    - 0.1% price tolerance: matches the ``H4_H1_PRICE_TOLERANCE_FRACTION``
+      used by the Sprint 2 multi-TF confluence promotion and the calibration
+      harness — keeping the same relative tolerance across the codebase
+      avoids cross-tuning surprises.
+
+    Note on symmetry: this uses ``|p1 - p2| <= tol * (|p1| + |p2|) / 2``,
+    which is symmetric in (p1, p2). ``mark_swing_levels`` uses the
+    asymmetric ``tol * abs(annotated_price)`` because it matches a
+    detected swing against an annotated reference price (the annotation
+    is canonical). Here we compare two detector outputs where neither
+    is canonical, so symmetry is the right default. Do NOT change
+    ``mark_swing_levels``.
+
+    Args:
+        sweeps: any list of ``Sweep`` objects. Empty list is allowed.
+        time_window_minutes: pairwise time window for cluster membership.
+            Must be ``>= 0``.
+        price_tolerance_fraction: pairwise relative price tolerance.
+            Must be ``>= 0``.
+
+    Returns:
+        Deduplicated ``list[Sweep]`` sorted by time ascending.
+    """
+    if time_window_minutes < 0:
+        raise ValueError(f"time_window_minutes must be >= 0, got {time_window_minutes}")
+    if price_tolerance_fraction < 0:
+        raise ValueError(f"price_tolerance_fraction must be >= 0, got {price_tolerance_fraction}")
+    if len(sweeps) <= 1:
+        return list(sweeps)
+
+    time_tol = timedelta(minutes=time_window_minutes)
+    n = len(sweeps)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            si, sj = sweeps[i], sweeps[j]
+            if si.direction != sj.direction:
+                continue
+            dt = abs(si.sweep_candle_time_utc - sj.sweep_candle_time_utc)
+            if dt > time_tol:
+                continue
+            avg_abs_price = (abs(si.swept_level_price) + abs(sj.swept_level_price)) / 2.0
+            price_tol = price_tolerance_fraction * avg_abs_price
+            if abs(si.swept_level_price - sj.swept_level_price) > price_tol:
+                continue
+            union(i, j)
+
+    clusters: dict[int, list[int]] = {}
+    for i in range(n):
+        clusters.setdefault(find(i), []).append(i)
+
+    kept: list[Sweep] = []
+    for members in clusters.values():
+        # Largest excursion wins; tie-break on earliest time.
+        best_idx = max(
+            members,
+            key=lambda k: (sweeps[k].excursion, -sweeps[k].sweep_candle_time_utc.timestamp()),
+        )
+        kept.append(sweeps[best_idx])
+
+    kept.sort(key=lambda s: s.sweep_candle_time_utc)
+    return kept
 
 
 def _find_return(

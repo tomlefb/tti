@@ -201,7 +201,8 @@ def test_mark_swing_levels_h4_h1_confluence_promotes_to_major() -> None:
         as_of_utc=datetime(2025, 7, 15, 0, 0, tzinfo=UTC),
         lookback_h4=1,
         lookback_h1=2,
-        min_amplitude_atr_mult=0.0,
+        min_amplitude_atr_mult_h4=0.0,
+        min_amplitude_atr_mult_h1=0.0,
         n_swings=5,
         h4_h1_time_tolerance_h4_candles=2,
         h4_h1_price_tolerance_fraction=0.05,  # generous — synthetic data
@@ -231,7 +232,8 @@ def test_mark_swing_levels_filters_by_as_of_utc() -> None:
         as_of_utc=datetime(2025, 7, 14, 4, 0, tzinfo=UTC),
         lookback_h4=1,
         lookback_h1=1,
-        min_amplitude_atr_mult=0.0,
+        min_amplitude_atr_mult_h4=0.0,
+        min_amplitude_atr_mult_h1=0.0,
         n_swings=5,
     )
     for lvl in out:

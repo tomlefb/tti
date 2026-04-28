@@ -51,7 +51,8 @@ _KILLZONE_LONDON = (9, 0, 12, 0)
 _KILLZONE_NY = (15, 30, 18, 0)
 _SWING_LOOKBACK_H4 = 2
 _SWING_LOOKBACK_H1 = 2
-_MIN_SWING_AMPLITUDE_ATR_MULT = 1.0
+_MIN_SWING_AMPLITUDE_ATR_MULT_H4 = 1.0
+_MIN_SWING_AMPLITUDE_ATR_MULT_H1 = 1.0
 _SWEEP_RETURN_WINDOW_CANDLES = 2
 _H4_H1_TIME_TOLERANCE_CANDLES_H4 = 2
 _H4_H1_PRICE_TOLERANCE_FRACTION = 0.001
@@ -116,7 +117,8 @@ def _build_marked_levels(
         as_of_utc=as_of_utc,
         lookback_h4=_SWING_LOOKBACK_H4,
         lookback_h1=_SWING_LOOKBACK_H1,
-        min_amplitude_atr_mult=_MIN_SWING_AMPLITUDE_ATR_MULT,
+        min_amplitude_atr_mult_h4=_MIN_SWING_AMPLITUDE_ATR_MULT_H4,
+        min_amplitude_atr_mult_h1=_MIN_SWING_AMPLITUDE_ATR_MULT_H1,
         n_swings=_SWING_LEVELS_LOOKBACK_COUNT,
         h4_h1_time_tolerance_h4_candles=_H4_H1_TIME_TOLERANCE_CANDLES_H4,
         h4_h1_price_tolerance_fraction=_H4_H1_PRICE_TOLERANCE_FRACTION,
@@ -146,7 +148,8 @@ def _format_report(rows: list[dict], dates: list[date]) -> str:
     lines.append("|---|---|")
     lines.append(f"| `SWING_LOOKBACK_H4` | `{_SWING_LOOKBACK_H4}` |")
     lines.append(f"| `SWING_LOOKBACK_H1` | `{_SWING_LOOKBACK_H1}` |")
-    lines.append(f"| `MIN_SWING_AMPLITUDE_ATR_MULT` | `{_MIN_SWING_AMPLITUDE_ATR_MULT}` |")
+    lines.append(f"| `MIN_SWING_AMPLITUDE_ATR_MULT_H4` | `{_MIN_SWING_AMPLITUDE_ATR_MULT_H4}` |")
+    lines.append(f"| `MIN_SWING_AMPLITUDE_ATR_MULT_H1` | `{_MIN_SWING_AMPLITUDE_ATR_MULT_H1}` |")
     lines.append(f"| `SWEEP_RETURN_WINDOW_CANDLES` | `{_SWEEP_RETURN_WINDOW_CANDLES}` |")
     lines.append(f"| `H4_H1_TIME_TOLERANCE_CANDLES_H4` | `{_H4_H1_TIME_TOLERANCE_CANDLES_H4}` |")
     lines.append(f"| `H4_H1_PRICE_TOLERANCE_FRACTION` | `{_H4_H1_PRICE_TOLERANCE_FRACTION}` |")

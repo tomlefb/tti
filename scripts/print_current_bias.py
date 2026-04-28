@@ -85,12 +85,12 @@ def main() -> int:
         swings_h4 = find_swings(
             df_h4,
             lookback=settings.SWING_LOOKBACK_H4,
-            min_amplitude_atr_mult=settings.MIN_SWING_AMPLITUDE_ATR_MULT,
+            min_amplitude_atr_mult=settings.MIN_SWING_AMPLITUDE_ATR_MULT_H4,
         )
         swings_h1 = find_swings(
             df_h1,
             lookback=settings.SWING_LOOKBACK_H1,
-            min_amplitude_atr_mult=settings.MIN_SWING_AMPLITUDE_ATR_MULT,
+            min_amplitude_atr_mult=settings.MIN_SWING_AMPLITUDE_ATR_MULT_H1,
         )
 
         bias_h4 = compute_timeframe_bias(swings_h4, settings.BIAS_SWING_COUNT)
@@ -100,8 +100,10 @@ def main() -> int:
             df_h1=df_h1,
             swing_lookback_h4=settings.SWING_LOOKBACK_H4,
             swing_lookback_h1=settings.SWING_LOOKBACK_H1,
-            min_amplitude_atr_mult=settings.MIN_SWING_AMPLITUDE_ATR_MULT,
+            min_amplitude_atr_mult_h4=settings.MIN_SWING_AMPLITUDE_ATR_MULT_H4,
+            min_amplitude_atr_mult_h1=settings.MIN_SWING_AMPLITUDE_ATR_MULT_H1,
             bias_swing_count=settings.BIAS_SWING_COUNT,
+            require_h1_confirmation=settings.BIAS_REQUIRE_H1_CONFIRMATION,
         )
 
         as_of = max(df_h4["time"].max(), df_h1["time"].max()).isoformat()
