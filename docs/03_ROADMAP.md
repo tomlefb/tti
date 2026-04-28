@@ -39,13 +39,20 @@ detector calibrated against the operator's eye.
 
 Deliverables:
 
-- [ ] `src/detection/swings.py` with parameterized lookback + ATR amplitude filter
-- [ ] `src/detection/bias.py` returning `bullish`/`bearish`/`no_trade`
-- [ ] Unit tests with hand-crafted fixtures
-- [ ] **Calibration session**: 5 reference charts marked manually by operator;
-      detector run on same periods; visual comparison report produced.
-- [ ] Tuned values committed to `config/settings.py.example`
-- [ ] CLI script that prints the current bias for all 4 watched pairs
+- [x] `src/detection/swings.py` with parameterized lookback + ATR amplitude filter
+- [x] `src/detection/bias.py` returning `bullish`/`bearish`/`no_trade`
+- [x] Unit tests with hand-crafted fixtures
+      (`tests/detection/test_swings.py`, `tests/detection/test_bias.py`)
+- [x] Integration tests on the committed historical fixtures
+      (`tests/detection/test_integration.py`)
+- [x] Calibration harness consuming operator-marked reference annotations
+      (`calibration/run_swing_calibration.py`)
+- [ ] **Calibration session**: operator-marked reference charts (target ≥ 18
+      sessions across H4 + H1) and detector report ≥ 80% precision and recall.
+- [ ] Tuned values committed to `config/settings.py.example` (operator decision
+      after the calibration session)
+- [x] CLI script that prints the current bias for all 4 watched pairs
+      (`scripts/print_current_bias.py`, fixture-based — not live MT5)
 
 **Done when**: bias output matches operator's manual reading on at least
 20 historical days across the 4 pairs (≥ 80% agreement), AND the
@@ -165,7 +172,12 @@ without this layer and document the negative result.
 ## Current state
 
 - **Active sprint**: 1
-- **Last updated**: Sprint 0 closed 2026-04-27; MT5 + Telegram validated on Windows host
+- **Last updated**: 2026-04-28 — Sprint 1 code shipped (swings.py, bias.py,
+  unit + integration tests, calibration harness, CLI bias script). Calibration
+  session pending: awaiting operator's reference annotations under
+  `calibration/reference_charts/{DATE}_{PAIR}_{TF}.json`. Sprint 1 stays
+  active until the harness produces a ≥ 80% precision-and-recall report and
+  the operator commits tuned values to `config/settings.py.example`.
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.

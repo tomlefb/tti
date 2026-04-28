@@ -1,1 +1,151 @@
-"""Daily bias from H4 + H1 swing structure — Sprint 1, not yet implemented. See docs/03_ROADMAP.md."""
+"""Daily bias from H4 + H1 swing structure (see docs/01 §3, docs/07 §1.3).
+
+Public API:
+
+- ``compute_timeframe_bias(swings, bias_swing_count)`` — bias on a single
+  timeframe from its significant-swings DataFrame.
+- ``compute_daily_bias(df_h4, df_h1, ...)`` — full daily bias requiring H4
+  and H1 agreement.
+
+Pure functions, no I/O.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+import pandas as pd
+
+from .swings import find_swings
+
+Bias = Literal["bullish", "bearish", "no_trade"]
+
+
+def _is_strict_bullish_structure(highs: list[float], lows: list[float]) -> bool:
+    """Strict HH AND HL: each new high > previous high; each new low > previous low.
+
+    "Broken-structure -> no_trade" is a heuristic per docs/07 §1.3 — by
+    requiring the *full* sequence to be strictly increasing on both
+    legs, a single late LL or LH instantly invalidates the bias.
+    """
+    if len(highs) < 2 or len(lows) < 2:
+        return False
+    for a, b in zip(highs, highs[1:], strict=False):
+        if not b > a:
+            return False
+    for a, b in zip(lows, lows[1:], strict=False):
+        if not b > a:
+            return False
+    return True
+
+
+def _is_strict_bearish_structure(highs: list[float], lows: list[float]) -> bool:
+    """Strict LH AND LL: symmetric to ``_is_strict_bullish_structure``."""
+    if len(highs) < 2 or len(lows) < 2:
+        return False
+    for a, b in zip(highs, highs[1:], strict=False):
+        if not b < a:
+            return False
+    for a, b in zip(lows, lows[1:], strict=False):
+        if not b < a:
+            return False
+    return True
+
+
+def compute_timeframe_bias(swings: pd.DataFrame, bias_swing_count: int) -> Bias:
+    """Determine bias from a single timeframe's significant swings.
+
+    Looks at the **last** ``bias_swing_count`` significant swing rows in
+    ``swings`` (i.e., rows where ``swing_type`` is not ``None``).
+
+    - ``"bullish"`` if the sequence shows Higher Highs AND Higher Lows.
+    - ``"bearish"`` if it shows Lower Highs AND Lower Lows.
+    - ``"no_trade"`` otherwise — including the ``"recent structure break"``
+      heuristic from docs/01 §3 / docs/07 §1.3: any single counter-trend
+      swing inside the window collapses the strict ordering and yields
+      ``"no_trade"``. This may be revisited.
+
+    "Insufficient data" (fewer than ``bias_swing_count`` significant swings,
+    or fewer than 2 highs and 2 lows in the window) also returns
+    ``"no_trade"``.
+
+    Args:
+        swings: DataFrame as produced by
+            ``swings.filter_significant_swings`` / ``swings.find_swings``.
+            Must contain ``swing_type`` and ``swing_price``.
+        bias_swing_count: number of trailing significant swings to consider.
+
+    Returns:
+        ``"bullish" | "bearish" | "no_trade"``.
+    """
+    if bias_swing_count < 2:
+        raise ValueError(f"bias_swing_count must be >= 2, got {bias_swing_count}")
+
+    sig = swings[swings["swing_type"].notna()]
+    if len(sig) < bias_swing_count:
+        return "no_trade"
+
+    window = sig.iloc[-bias_swing_count:]
+    types = window["swing_type"].tolist()
+    prices = window["swing_price"].tolist()
+
+    highs = [p for t, p in zip(types, prices, strict=False) if t == "high"]
+    lows = [p for t, p in zip(types, prices, strict=False) if t == "low"]
+
+    if _is_strict_bullish_structure(highs, lows):
+        return "bullish"
+    if _is_strict_bearish_structure(highs, lows):
+        return "bearish"
+    return "no_trade"
+
+
+def compute_daily_bias(
+    df_h4: pd.DataFrame,
+    df_h1: pd.DataFrame,
+    swing_lookback_h4: int,
+    swing_lookback_h1: int,
+    min_amplitude_atr_mult: float,
+    bias_swing_count: int,
+    atr_period: int = 14,
+) -> Bias:
+    """Compute the final daily bias by requiring H4 and H1 agreement.
+
+    Runs ``find_swings`` on each timeframe, then ``compute_timeframe_bias``,
+    then combines:
+
+    - ``"bullish"`` if H4 and H1 are both bullish.
+    - ``"bearish"`` if H4 and H1 are both bearish.
+    - ``"no_trade"`` otherwise.
+
+    Args:
+        df_h4: H4 OHLC frame.
+        df_h1: H1 OHLC frame.
+        swing_lookback_h4: ``SWING_LOOKBACK_H4`` from settings.
+        swing_lookback_h1: ``SWING_LOOKBACK_H1`` from settings.
+        min_amplitude_atr_mult: ``MIN_SWING_AMPLITUDE_ATR_MULT`` from settings.
+        bias_swing_count: ``BIAS_SWING_COUNT`` from settings.
+        atr_period: ATR window used by the amplitude filter (default 14).
+
+    Returns:
+        ``"bullish" | "bearish" | "no_trade"``.
+    """
+    swings_h4 = find_swings(
+        df_h4,
+        lookback=swing_lookback_h4,
+        min_amplitude_atr_mult=min_amplitude_atr_mult,
+        atr_period=atr_period,
+    )
+    swings_h1 = find_swings(
+        df_h1,
+        lookback=swing_lookback_h1,
+        min_amplitude_atr_mult=min_amplitude_atr_mult,
+        atr_period=atr_period,
+    )
+    bias_h4 = compute_timeframe_bias(swings_h4, bias_swing_count)
+    bias_h1 = compute_timeframe_bias(swings_h1, bias_swing_count)
+
+    if bias_h4 == "bullish" and bias_h1 == "bullish":
+        return "bullish"
+    if bias_h4 == "bearish" and bias_h1 == "bearish":
+        return "bearish"
+    return "no_trade"
