@@ -69,14 +69,21 @@ calibration report is checked into `calibration/reference_charts/`.
 
 Deliverables:
 
-- [ ] Implement `mark_swing_levels()` with multi-TF confluence promotion
+- [x] Implement `mark_swing_levels()` with multi-TF confluence promotion
       (H4 ∩ H1) per operator's liquidity-hierarchy philosophy. See
       `calibration/runs/FINAL_swing_calibration.md`.
-- [ ] `src/detection/liquidity.py`: Asian range, PDH/PDL, swing levels, equal H/L
-- [ ] `src/detection/sweep.py`: sweep detection on M5 with per-instrument buffers
-- [ ] Unit tests
-- [ ] **Calibration**: per-instrument sweep buffer tuned on a few weeks of historical M5
-- [ ] CLI script that scans the last N days and prints all detected sweeps
+- [x] `src/detection/liquidity.py`: Asian range, PDH/PDL, swing levels, equal H/L
+- [x] `src/detection/sweep.py`: sweep detection on M5 with per-instrument buffers
+- [x] Unit tests (`tests/detection/test_liquidity.py`, `test_sweep.py`)
+- [x] Integration tests on the 19 reference dates × 4 pairs × 2 killzones
+      (`tests/detection/test_sweep_integration.py`) producing a markdown
+      sweep report at `calibration/runs/{TIMESTAMP}_sweep_integration.md`
+- [~] **Calibration**: deferred — buffers kept at default values;
+      calibration to be triggered if Sprint 3+ shows excessive FP/FN on
+      real sweeps. Spot-check of the integration report (1270 sweeps over
+      18 dates × 4 pairs) was acceptable to the operator.
+- [x] CLI script that prints liquidity + sweeps for one (date, pair)
+      (`scripts/print_liquidity_and_sweeps.py`)
 
 **Done when**: detected sweeps match operator's eyeball assessment on
 historical data (≥ 80% agreement on a sample of marked days), buffers
@@ -90,6 +97,9 @@ calibrated.
 
 Deliverables:
 
+- [ ] Sweep deduplication — multiple M5 candles sweeping the same level
+      within a short window must collapse to a single sweep event for
+      downstream consumption.
 - [ ] `src/detection/mss.py` with calibrated displacement filter
 - [ ] `src/detection/fvg.py` with ATR-based size filter
 - [ ] `src/detection/order_block.py` (fallback POI)
@@ -177,10 +187,12 @@ without this layer and document the negative result.
 
 ## Current state
 
-- **Active sprint**: 2
-- **Last updated**: Sprint 1 closed 2026-04-28; H4 detector calibrated
-  (F1=81.8%), H1 design choice deferred to Sprint 2 — see
-  `calibration/runs/FINAL_swing_calibration.md`.
+- **Active sprint**: 3
+- **Last updated**: Sprint 2 closed 2026-04-28; liquidity marking + sweep
+  detection on M5 shipped (1270 sweeps detected on 18 reference dates,
+  spot-check validated). NY killzone capped at 18:00 Paris by design
+  (FOMC at 20:00 Paris out of scope). Sprint 3 ready: MSS + FVG + setup
+  orchestrator + grading.
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.

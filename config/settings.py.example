@@ -73,6 +73,31 @@ MIN_SWING_AMPLITUDE_ATR_MULT = 1.0
 BIAS_SWING_COUNT = 4
 
 # -----------------------------------------------------------------------------
+# Detection: SWING LEVELS — multi-TF confluence (Sprint 2 — heuristic)
+# -----------------------------------------------------------------------------
+# Per `calibration/runs/FINAL_swing_calibration.md`, the operator's strategy
+# treats liquidity strength as a function of multi-TF confluence: an H1 swing
+# that ALSO shows up as an H4 swing is "major"; an isolated H1 pivot is
+# "minor". `mark_swing_levels()` in `src/detection/liquidity.py` implements
+# the H4 ∩ H1 promotion using the keys below.
+#
+# These are docs/07 §1.3 heuristic defaults — to be revisited based on
+# Sprint 2 empirical results.
+
+# Time tolerance for matching an H4 swing to an H1 swing, expressed in
+# H4 candles. 2 H4 candles = ±8h either side of the H4 swing.
+H4_H1_TIME_TOLERANCE_CANDLES_H4 = 2
+
+# Price tolerance for the same match, as a fraction of the swing price.
+# 0.001 = 0.1% — same value used by the calibration matching harness.
+H4_H1_PRICE_TOLERANCE_FRACTION = 0.001
+
+# How many of the most recent H4 significant swings to consider as
+# candidates for promotion. H1 minor swings are taken from the last
+# 2 × this count (more numerous on the lower timeframe).
+SWING_LEVELS_LOOKBACK_COUNT = 5
+
+# -----------------------------------------------------------------------------
 # Detection: SWEEP (calibrated rule)
 # -----------------------------------------------------------------------------
 

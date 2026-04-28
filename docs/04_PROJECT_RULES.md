@@ -180,6 +180,14 @@ If a key is renamed, update this table first, then code, then docs.
 | `MIN_SWING_AMPLITUDE_ATR_MULT` | `float` | Min distance to prev opposite-type swing as multiple of ATR(14). |
 | `BIAS_SWING_COUNT` | `int` | Number of significant swings considered when computing daily bias. |
 
+### Multi-TF confluence (Sprint 2 — calibrated heuristic)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `H4_H1_TIME_TOLERANCE_CANDLES_H4` | `int` | Time tolerance for promoting an H1 swing to "major" via H4 confluence, expressed in H4 candles (±). |
+| `H4_H1_PRICE_TOLERANCE_FRACTION` | `float` | Price tolerance for the same match, as fraction of swing price (e.g. `0.001` = 0.1%). |
+| `SWING_LEVELS_LOOKBACK_COUNT` | `int` | Number of most recent H4 swings considered as promotion candidates. Minor H1 swings come from the last `2 × this` swings. |
+
 ### Sweep (calibrated)
 
 | Key | Type | Meaning |
