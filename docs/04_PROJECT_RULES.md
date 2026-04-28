@@ -270,12 +270,14 @@ for FX (`EURUSD`, `GBPUSD`).
 |---|---|---|
 | `DB_PATH` | `str` (path) | SQLite journal file path. |
 
-### Chart rendering
+### Notification (Sprint 4)
 
 | Key | Type | Meaning |
 |---|---|---|
-| `CHART_OUTPUT_DIR` | `str` (path) | Directory for runtime chart screenshots. |
-| `CHART_LOOKBACK_CANDLES_M5` | `int` | M5 candles included in the notification chart. |
+| `CHART_OUTPUT_DIR` | `str` (path) | Directory for runtime chart screenshots (gitignored). |
+| `CHART_LOOKBACK_CANDLES_M5` | `int` | M5 candles before MSS confirm shown in the chart. |
+| `CHART_LOOKFORWARD_CANDLES_M5` | `int` | M5 candles after MSS confirm shown in the chart. |
+| `TELEGRAM_CALLBACK_TIMEOUT_SECONDS` | `int` | Polling window for `scripts/test_notification.py` after sending the test setup. |
 
 ### Secrets (from `config/secrets.py`, gitignored)
 

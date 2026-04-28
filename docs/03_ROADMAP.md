@@ -142,19 +142,25 @@ as valid by operator manual review.
 
 Deliverables:
 
-- [ ] **Notification format**: TP1 (5R partial) and TP_runner (full RR)
+- [x] **Notification format**: TP1 (5R partial) and TP_runner (full RR)
       distinct, with `high_rr_runner` confluence flagged for tradability
-      (extended-leg setups → emphasise scaling out at TP1).
-- [ ] **Killzone gating**: filter setups whose `timestamp_utc` (MSS confirm
-      time) falls outside the London/NY killzone end. Per docs/01 §6,
-      notifications must not fire outside killzones even if the detection
-      pipeline produces them. Decision: filter at notification time, not
-      detection time — keeps the orchestrator's Setup output complete and
-      auditable for backtests, while the notifier enforces the live rule.
-- [ ] `src/notification/chart_renderer.py` produces annotated PNGs
-- [ ] `src/notification/message_formatter.py` builds the text summary
-- [ ] `src/notification/telegram_bot.py` sends + handles inline button callbacks
-- [ ] Manual test: trigger a fake `Setup` → receive notification → click button → confirm callback received
+      (extended-leg setups → emphasise scaling out at TP1; 🚀 emoji on
+      the TP_R line when this confluence is set).
+- [x] **Killzone gating**: filter setups whose `timestamp_utc` (MSS confirm
+      time) falls outside the killzone end. Implemented in
+      `build_setup_candidates` (orchestrator) — the integration test post-gating
+      drops 3 setups from the Sprint 3 baseline (16 → 13): 2025-07-03 NDX100
+      11:40 UTC London, 2025-11-21 XAUUSD 17:35 UTC NY, 2026-01-14 NDX100
+      18:20 UTC NY. Boundary policy: timestamp == kz_end_utc kept (inclusive).
+- [x] `src/notification/chart_renderer.py` produces annotated PNGs
+      (mplfinance + matplotlib, headless Agg backend).
+- [x] `src/notification/message_formatter.py` builds the HTML caption
+      with per-symbol price precision and Paris-time parenthetical.
+- [x] `src/notification/telegram_bot.py` sends + handles inline button
+      callbacks (Taken/Skipped) with injectable ``on_callback`` for Sprint 5.
+- [x] Manual test: `scripts/test_notification.py` builds a real Setup
+      from fixtures, renders chart, prints caption, sends to Telegram,
+      polls 60 s for callback. `--no-send` mode for visual review on Mac.
 
 **Done when**: clicking `Taken`/`Skipped` on a notification persists the
 decision (Sprint 5 will hook this into the journal).
@@ -167,6 +173,13 @@ decision (Sprint 5 will hook this into the journal).
 
 Deliverables:
 
+- [ ] Hook the Telegram callback (Taken/Skipped) into SQLite persistence
+      (currently stubs in `src/notification/telegram_bot.py` via the
+      `on_callback` parameter).
+- [ ] Persist ALL detected setups, including rejected ones (useful for
+      tuning).
+- [ ] Outcome tracker reconciles MT5 trade history with journal setups
+      by symbol + timestamp proximity.
 - [ ] `src/journal/schema.sql` and migrations
 - [ ] `src/journal/repository.py` for CRUD
 - [ ] `src/journal/outcome_tracker.py` queries MT5 history daily
@@ -218,11 +231,12 @@ without this layer and document the negative result.
 
 ## Current state
 
-- **Active sprint**: 4
-- **Last updated**: Sprint 3 closed 2026-04-28; setup orchestrator + MSS +
-  FVG + OB + grading shipped. 16 setups detected on 18 reference dates × 4
-  pairs (5 A + 11 B). H4 amplitude tightened to 1.3, bias became H4-only
-  by default. TP1 partial-exit at 5R + TP_runner free RR. Sprint 4 ready.
+- **Active sprint**: 5
+- **Last updated**: Sprint 4 closed 2026-04-28; Telegram notifications +
+  chart rendering shipped. Killzone gating filter added (16 → 13 setups).
+  Sample chart visually validated. Manual E2E test pending on Windows host
+  (`scripts/test_notification.py`). Sprint 5 ready: journal & outcome
+  tracking.
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.

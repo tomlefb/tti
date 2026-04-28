@@ -21,6 +21,7 @@ Heuristics consolidated here (each documented inline):
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Literal, Protocol
@@ -48,6 +49,8 @@ from .liquidity import (
 from .mss import MSS, detect_mss
 from .order_block import OrderBlock, detect_order_block
 from .sweep import Sweep, detect_sweeps
+
+logger = logging.getLogger(__name__)
 
 
 class SetupSettings(Protocol):
@@ -297,8 +300,27 @@ def build_setup_candidates(
                 levels=levels,
                 settings=settings,
             )
-            if setup is not None:
-                setups.append(setup)
+            if setup is None:
+                continue
+
+            # Killzone gating per docs/01 §6: notifications must not fire
+            # outside London/NY killzones. The detection pipeline can produce
+            # setups whose MSS confirms after killzone close (the MSS
+            # lookforward window extends past killzone end). These are
+            # dropped here. Boundary policy: timestamp == kz_end_utc is kept
+            # (inclusive end), strictly greater is dropped.
+            if setup.timestamp_utc > kz_end_utc:
+                logger.debug(
+                    "setup dropped (timestamp_utc=%s > killzone_end_utc=%s) "
+                    "symbol=%s killzone=%s",
+                    setup.timestamp_utc,
+                    kz_end_utc,
+                    symbol,
+                    kz_name,
+                )
+                continue
+
+            setups.append(setup)
 
     return setups
 

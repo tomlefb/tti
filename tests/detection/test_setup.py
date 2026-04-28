@@ -215,6 +215,128 @@ def test_orchestrator_no_bias_returns_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Killzone gating (Sprint 4)
+# ---------------------------------------------------------------------------
+
+
+def _make_setup(timestamp_utc: datetime) -> Setup:
+    """Minimal Setup with a configurable ``timestamp_utc``. Other fields are
+    placeholders — the gating filter only inspects ``timestamp_utc`` and
+    ``killzone``."""
+    sweep = _stub_sweep(99.0, 99.5, "bullish")
+    fvg = _stub_fvg("bullish", 102.0, 101.0)
+    from src.detection.mss import MSS
+
+    mss = MSS(
+        direction="bullish",
+        sweep=sweep,
+        broken_swing_time_utc=timestamp_utc,
+        broken_swing_price=110.0,
+        mss_confirm_candle_time_utc=timestamp_utc,
+        mss_confirm_candle_close=110.5,
+        displacement_body_ratio=2.0,
+        displacement_candle_time_utc=timestamp_utc,
+    )
+    return Setup(
+        timestamp_utc=timestamp_utc,
+        symbol="TEST",
+        direction="long",
+        daily_bias="bullish",
+        killzone="ny",
+        swept_level_price=99.5,
+        swept_level_type="asian_low",
+        swept_level_strength="structural",
+        sweep=sweep,
+        mss=mss,
+        poi=fvg,
+        poi_type="FVG",
+        entry_price=102.0,
+        stop_loss=99.0,
+        target_level_type="asian_high",
+        tp_runner_price=120.0,
+        tp_runner_rr=6.0,
+        tp1_price=117.0,
+        tp1_rr=5.0,
+        quality="A",
+        confluences=[],
+    )
+
+
+def test_killzone_gating_drops_setups_with_late_mss_confirm(monkeypatch) -> None:
+    """A setup whose MSS confirms after the killzone end is filtered out.
+
+    Per docs/01 §6, notifications must not fire outside London/NY killzones
+    even if the detection pipeline produces them (the MSS lookforward window
+    extends ~120 minutes past the killzone end).
+    """
+    import src.detection.setup as setup_module
+
+    settings = _settings()
+
+    # Force daily bias = bullish so the orchestrator enters the killzone
+    # loop. We don't need real H4/H1 data — bypass the bias detector.
+    monkeypatch.setattr(setup_module, "compute_daily_bias", lambda **_: "bullish")
+    # Bypass liquidity marking — the dummy levels list is unused by our stub.
+    monkeypatch.setattr(
+        setup_module,
+        "_build_marked_levels",
+        lambda **_: (None, None, [], [], []),
+    )
+    # Bypass sweep detection — emit a single dummy sweep so the inner loop
+    # executes once per killzone.
+    monkeypatch.setattr(
+        setup_module, "detect_sweeps", lambda *a, **kw: [_stub_sweep(99.0, 99.5, "bullish")]
+    )
+
+    # NY killzone for 2025-07-14 in summer time:
+    #   Paris 15:30–18:00 → UTC 13:30–16:00.
+    # Build one setup at exactly kz_end (kept) and one one minute after (dropped).
+    target_date = date(2025, 7, 14)
+    kz_end_utc = datetime(2025, 7, 14, 16, 0, tzinfo=UTC)
+
+    # London killzone returns no setup, NY returns the late-confirm one.
+    calls = {"n": 0}
+
+    def fake_try_build_setup(*, killzone, **_):
+        calls["n"] += 1
+        if killzone == "london":
+            return None
+        # NY: produce a setup 1 minute past kz end → must be dropped.
+        return _make_setup(kz_end_utc + pd.Timedelta(minutes=1).to_pytimedelta())
+
+    monkeypatch.setattr(setup_module, "_try_build_setup", fake_try_build_setup)
+
+    out = build_setup_candidates(
+        df_h4=_empty_df_for_tf("H4"),
+        df_h1=_empty_df_for_tf("H1"),
+        df_m5=_empty_df_for_tf("M5"),
+        df_d1=_empty_df_for_tf("D1"),
+        target_date=target_date,
+        symbol="TEST",
+        settings=settings,
+    )
+    assert out == []
+
+    # Now retest with timestamp == kz_end_utc — must be kept.
+    monkeypatch.setattr(
+        setup_module,
+        "_try_build_setup",
+        lambda *, killzone, **_: _make_setup(kz_end_utc) if killzone == "ny" else None,
+    )
+    out = build_setup_candidates(
+        df_h4=_empty_df_for_tf("H4"),
+        df_h1=_empty_df_for_tf("H1"),
+        df_m5=_empty_df_for_tf("M5"),
+        df_d1=_empty_df_for_tf("D1"),
+        target_date=target_date,
+        symbol="TEST",
+        settings=settings,
+    )
+    assert len(out) == 1
+    assert out[0].timestamp_utc == kz_end_utc
+
+
+# ---------------------------------------------------------------------------
 # _compute_tp1 — partial-exit cap
 # ---------------------------------------------------------------------------
 

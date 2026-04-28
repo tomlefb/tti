@@ -260,8 +260,21 @@ LOG_LEVEL = "INFO"
 DB_PATH = "data/journal.db"
 
 # -----------------------------------------------------------------------------
-# Chart rendering
+# Notification (Sprint 4)
 # -----------------------------------------------------------------------------
 
+# Where notification chart PNGs are written. Gitignored by default. The
+# bot reads from disk and ships the file to Telegram; cleanup is the
+# operator's responsibility (or a Sprint 6+ janitor task).
 CHART_OUTPUT_DIR = "runtime_charts"
-CHART_LOOKBACK_CANDLES_M5 = 80     # M5 candles shown in notification chart
+
+# M5 candles included in the notification chart, before / after the MSS
+# confirm candle. 80 + 10 ≈ 7.5h of context — operator can re-eyeball
+# the bias structure without leaving Telegram.
+CHART_LOOKBACK_CANDLES_M5 = 80
+CHART_LOOKFORWARD_CANDLES_M5 = 10
+
+# Manual smoke-test polling window in scripts/test_notification.py. The
+# operator clicks Taken/Skipped within this many seconds; if no click,
+# the script exits gracefully so the operator can re-run.
+TELEGRAM_CALLBACK_TIMEOUT_SECONDS = 60
