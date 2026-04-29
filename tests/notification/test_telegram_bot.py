@@ -214,3 +214,53 @@ async def test_stop_without_start_is_noop(fake_application) -> None:
     notifier = tg_module.TelegramNotifier(bot_token="t", chat_id=42)
     await notifier.stop()  # Should silently no-op.
     fake_application.stop.assert_not_called()
+
+
+async def test_send_setup_retries_on_failure(fake_application, tmp_path: Path) -> None:
+    """send_setup retries up to 3 times on transient send_photo errors."""
+    chart = tmp_path / "chart.png"
+    chart.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+
+    sent_message = SimpleNamespace(message_id=99)
+    fake_application.bot.send_photo = AsyncMock(
+        side_effect=[RuntimeError("flaky"), RuntimeError("flaky2"), sent_message]
+    )
+
+    notifier = tg_module.TelegramNotifier(bot_token="t", chat_id=42)
+    setup = _stub_setup()
+    ok = await notifier.send_setup(setup, chart, retry_delay_seconds=0.0)
+    assert ok is True
+    assert fake_application.bot.send_photo.await_count == 3
+
+
+async def test_send_setup_returns_false_after_max_attempts(
+    fake_application, tmp_path: Path
+) -> None:
+    """When every attempt fails, send_setup returns False without raising."""
+    chart = tmp_path / "chart.png"
+    chart.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+
+    fake_application.bot.send_photo = AsyncMock(side_effect=RuntimeError("dead"))
+
+    notifier = tg_module.TelegramNotifier(bot_token="t", chat_id=42)
+    setup = _stub_setup()
+    ok = await notifier.send_setup(setup, chart, retry_delay_seconds=0.0, max_attempts=3)
+    assert ok is False
+    assert fake_application.bot.send_photo.await_count == 3
+
+
+async def test_send_error_uses_send_message_and_swallows_failures(fake_application) -> None:
+    fake_application.bot.send_message = AsyncMock(return_value=None)
+
+    notifier = tg_module.TelegramNotifier(bot_token="t", chat_id=42)
+    ok = await notifier.send_error("⚠️ MT5 cycle skipped")
+    assert ok is True
+    fake_application.bot.send_message.assert_awaited_once()
+    kwargs = fake_application.bot.send_message.await_args.kwargs
+    assert kwargs["chat_id"] == 42
+    assert kwargs["text"] == "⚠️ MT5 cycle skipped"
+
+    # Now make it fail and ensure it returns False rather than raising.
+    fake_application.bot.send_message = AsyncMock(side_effect=RuntimeError("nope"))
+    ok = await notifier.send_error("again")
+    assert ok is False

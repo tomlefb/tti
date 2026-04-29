@@ -4,7 +4,9 @@ Sprint 4 deliverable. Public surface is a single class, ``TelegramNotifier``,
 that:
 
 - Sends a setup notification = chart PNG + HTML caption + Taken/Skipped
-  inline keyboard.
+  inline keyboard, with up to 3 retry attempts (Sprint 6).
+- Sends a plain text error/heartbeat message via ``send_error`` and
+  ``send_text`` (Sprint 6).
 - Polls Telegram for button callbacks.
 - Routes callbacks to an injected ``on_callback`` so Sprint 5 can plug in
   the SQLite journal without changing this module.
@@ -15,6 +17,7 @@ mock ``Application``/``bot`` instead.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import datetime
@@ -81,11 +84,26 @@ class TelegramNotifier:
     # Public API
     # -----------------------------------------------------------------
 
-    async def send_setup(self, setup: Setup, chart_path: Path) -> None:
-        """Send the setup notification (chart + caption + inline keyboard).
+    async def send_setup(
+        self,
+        setup: Setup,
+        chart_path: Path,
+        *,
+        max_attempts: int = 3,
+        retry_delay_seconds: float = 1.0,
+    ) -> bool:
+        """Send the setup notification with up to 3 retries on failure.
 
         Caption is built from ``format_setup_message``. Telegram caption
         size limit is 1024 chars; our captions stay well below ~600.
+
+        Sprint 6: per docs/04 §"Error handling", a Telegram failure must
+        NOT crash the scheduler. We retry ``max_attempts`` times and then
+        give up — the setup remains in the journal so it's not lost.
+
+        Returns:
+            ``True`` if the message was sent, ``False`` if every attempt
+            failed.
         """
         caption = format_setup_message(setup)
         sid = _setup_id(setup)
@@ -97,19 +115,68 @@ class TelegramNotifier:
                 ]
             ]
         )
-        with Path(chart_path).open("rb") as f:
-            message = await self._application.bot.send_photo(
-                chat_id=self._chat_id,
-                photo=f,
-                caption=caption,
-                parse_mode="HTML",
-                reply_markup=keyboard,
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with Path(chart_path).open("rb") as f:
+                    message = await self._application.bot.send_photo(
+                        chat_id=self._chat_id,
+                        photo=f,
+                        caption=caption,
+                        parse_mode="HTML",
+                        reply_markup=keyboard,
+                    )
+            except Exception as exc:  # noqa: BLE001 — Telegram errors swallowed
+                logger.warning(
+                    "send_setup attempt %d/%d failed for %s: %r",
+                    attempt,
+                    max_attempts,
+                    sid,
+                    exc,
+                )
+                if attempt == max_attempts:
+                    logger.error(
+                        "send_setup giving up for %s after %d attempts — setup "
+                        "remains in journal but no Telegram notification fired",
+                        sid,
+                        max_attempts,
+                    )
+                    return False
+                await asyncio.sleep(retry_delay_seconds * attempt)
+                continue
+
+            self._message_ids[sid] = message.message_id
+            self._timestamps[sid] = setup.timestamp_utc
+            logger.info(
+                "Sent setup notification for %s (message_id=%d, attempt=%d)",
+                sid,
+                message.message_id,
+                attempt,
             )
-        # Remember message id + timestamp so the eventual button click can
-        # edit the right message and forward the right timestamp downstream.
-        self._message_ids[sid] = message.message_id
-        self._timestamps[sid] = setup.timestamp_utc
-        logger.info("Sent setup notification for %s (message_id=%d)", sid, message.message_id)
+            return True
+        return False  # unreachable; appeases the type-checker
+
+    async def send_text(self, text: str, *, parse_mode: str | None = None) -> bool:
+        """Send a plain text message with no chart, no buttons, no retries.
+
+        Used by the scheduler for heartbeats and error alerts. A failure
+        is logged but not raised — the scheduler can survive a
+        Telegram-down moment.
+        """
+        try:
+            await self._application.bot.send_message(
+                chat_id=self._chat_id,
+                text=text,
+                parse_mode=parse_mode,
+            )
+        except Exception as exc:  # noqa: BLE001 — never crash the scheduler
+            logger.error("send_text failed: %r — text=%r", exc, text)
+            return False
+        return True
+
+    async def send_error(self, text: str) -> bool:
+        """Send an error/critical alert. Thin wrapper around ``send_text``."""
+        return await self.send_text(text)
 
     async def start_polling(self) -> None:
         """Start the bot's update polling loop. Blocks until ``stop()``."""

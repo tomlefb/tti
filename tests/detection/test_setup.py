@@ -294,13 +294,19 @@ def test_killzone_gating_drops_setups_with_late_mss_confirm(monkeypatch) -> None
     target_date = date(2025, 7, 14)
     kz_end_utc = datetime(2025, 7, 14, 16, 0, tzinfo=UTC)
 
-    # London killzone returns no setup, NY returns the late-confirm one.
+    # London killzone rejects the dummy sweep, NY returns the late-confirm one.
     calls = {"n": 0}
+    london_rejection = setup_module.RejectedCandidate(
+        timestamp_utc=datetime(2025, 7, 14, 9, 0, tzinfo=UTC),
+        symbol="TEST",
+        rejection_reason="no_mss_after_sweep",
+        sweep_info=None,
+    )
 
     def fake_try_build_setup(*, killzone, **_):
         calls["n"] += 1
         if killzone == "london":
-            return None
+            return london_rejection
         # NY: produce a setup 1 minute past kz end → must be dropped.
         return _make_setup(kz_end_utc + pd.Timedelta(minutes=1).to_pytimedelta())
 
@@ -321,7 +327,9 @@ def test_killzone_gating_drops_setups_with_late_mss_confirm(monkeypatch) -> None
     monkeypatch.setattr(
         setup_module,
         "_try_build_setup",
-        lambda *, killzone, **_: _make_setup(kz_end_utc) if killzone == "ny" else None,
+        lambda *, killzone, **_: (
+            _make_setup(kz_end_utc) if killzone == "ny" else london_rejection
+        ),
     )
     out = build_setup_candidates(
         df_h4=_empty_df_for_tf("H4"),
@@ -430,3 +438,84 @@ def test_setup_backwards_compat_aliases() -> None:
     assert setup.risk_reward == 6.0
     assert setup.tp1_price == 117.0
     assert setup.tp1_rr == 5.0
+
+
+# ---------------------------------------------------------------------------
+# return_rejected (Sprint 6)
+# ---------------------------------------------------------------------------
+
+
+def test_return_rejected_default_false_keeps_legacy_signature() -> None:
+    """Existing callers (no kwarg) get a plain ``list[Setup]`` back."""
+    out = build_setup_candidates(
+        df_h4=_empty_df_for_tf("H4"),
+        df_h1=_empty_df_for_tf("H1"),
+        df_m5=_empty_df_for_tf("M5"),
+        df_d1=_empty_df_for_tf("D1"),
+        target_date=date(2025, 7, 14),
+        symbol="TEST",
+        settings=_settings(),
+    )
+    assert isinstance(out, list)
+
+
+def test_return_rejected_true_returns_tuple_with_kz_gating(monkeypatch) -> None:
+    """When ``return_rejected=True``, killzone-gated setups appear in the
+    rejected list with reason ``"killzone_gating"``."""
+    import src.detection.setup as setup_module
+    from src.detection.setup import RejectedCandidate
+
+    settings = _settings()
+    monkeypatch.setattr(setup_module, "compute_daily_bias", lambda **_: "bullish")
+    monkeypatch.setattr(setup_module, "_build_marked_levels", lambda **_: (None, None, [], [], []))
+    monkeypatch.setattr(
+        setup_module, "detect_sweeps", lambda *a, **kw: [_stub_sweep(99.0, 99.5, "bullish")]
+    )
+
+    target_date = date(2025, 7, 14)
+    kz_end_utc = datetime(2025, 7, 14, 16, 0, tzinfo=UTC)
+    london_rejection = RejectedCandidate(
+        timestamp_utc=datetime(2025, 7, 14, 9, 0, tzinfo=UTC),
+        symbol="TEST",
+        rejection_reason="no_mss_after_sweep",
+        sweep_info=None,
+    )
+
+    monkeypatch.setattr(
+        setup_module,
+        "_try_build_setup",
+        lambda *, killzone, **_: (
+            _make_setup(kz_end_utc + pd.Timedelta(minutes=1).to_pytimedelta())
+            if killzone == "ny"
+            else london_rejection
+        ),
+    )
+
+    setups, rejected = build_setup_candidates(
+        df_h4=_empty_df_for_tf("H4"),
+        df_h1=_empty_df_for_tf("H1"),
+        df_m5=_empty_df_for_tf("M5"),
+        df_d1=_empty_df_for_tf("D1"),
+        target_date=target_date,
+        symbol="TEST",
+        settings=settings,
+        return_rejected=True,
+    )
+    assert setups == []
+    # London emits the no_mss_after_sweep rejection; NY emits killzone_gating.
+    reasons = sorted(r.rejection_reason for r in rejected)
+    assert reasons == ["killzone_gating", "no_mss_after_sweep"]
+
+
+def test_no_opposing_or_low_rr_classification() -> None:
+    """The rr_below_threshold vs no_opposing_liquidity discriminator works."""
+    from src.detection.setup import _no_opposing_or_low_rr
+
+    sweep = _stub_sweep(99.0, 99.5, "bullish")
+    levels = [
+        MarkedLevel(price=110.0, type="high", label="asian_high", strength="structural"),
+    ]
+    # Long, entry=100, opposing high at 110 → opposing exists ⇒ rr_below_threshold.
+    assert _no_opposing_or_low_rr("long", 100.0, levels, sweep) == "rr_below_threshold"
+    # Long, no opposing high above entry.
+    assert _no_opposing_or_low_rr("long", 200.0, levels, sweep) == "no_opposing_liquidity"

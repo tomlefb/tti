@@ -254,6 +254,22 @@ for FX (`EURUSD`, `GBPUSD`).
 |---|---|---|
 | `DETECTION_INTERVAL_MINUTES` | `int` | Period of the detection cycle inside killzones. |
 | `HEARTBEAT_AT_KILLZONE_START` | `bool` | Whether to send a Telegram heartbeat at killzone start. |
+| `HEARTBEAT_AT_KILLZONE_CLOSE_IF_EMPTY` | `bool` | When `True`, send a "no setup detected" heartbeat at killzone close — only fires if no setup notification went out during that killzone. |
+| `PRE_KILLZONE_BIAS_LEAD_MINUTES` | `int` | Minutes before a killzone start at which the pre-killzone bias job runs. Cached into `daily_state` and surfaced in the open heartbeat. |
+| `OUTCOME_RECONCILIATION_HOUR_PARIS` | `int` | Paris-local hour (0–23) of the daily outcome-tracker reconciliation. Default 23 — matches FundedNext broker rollover. |
+
+### MT5 robustness (Sprint 6)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `MT5_RETRY_MAX_ATTEMPTS` | `int` | Total attempts (≥ 1) for `fetch_ohlc` / `get_recent_trades` before the cycle gives up. `connect()` is NOT retried. |
+| `MT5_RETRY_BASE_DELAY_SECONDS` | `float` | Seconds before the first retry; doubles each attempt. Defaults yield 1, 2, 4, 8, 16 s = 31 s total. |
+
+### Manual safety override (Sprint 6)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `MAX_LOSS_OVERRIDE` | `bool` | When `True`, the `max_loss_critical` hard stop is suppressed. Set ONLY after manually reviewing the breach (see docs/05). |
 
 ### Logging
 

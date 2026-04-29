@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Literal, Protocol
+from typing import Literal, Protocol, overload
 
 import pandas as pd
 
@@ -189,6 +189,36 @@ class Setup:
         return self.tp_runner_rr
 
 
+@dataclass(frozen=True)
+class RejectedCandidate:
+    """A sweep that almost-but-not-quite became a Setup.
+
+    Sprint 6 journals these alongside accepted Setups so the operator can
+    audit *why* a notification did not fire (calibration aid). Only
+    candidates that survived the bias-direction filter are tracked —
+    direction-misaligned sweeps would dwarf the table.
+
+    ``rejection_reason`` is one of:
+
+    - ``"no_mss_after_sweep"`` — no displacement / structure break.
+    - ``"no_poi_found"`` — no FVG and no fallback OB.
+    - ``"invalid_risk"`` — entry coincides with stop loss.
+    - ``"no_opposing_liquidity"`` — no opposing level → can't measure RR.
+    - ``"rr_below_threshold"`` — opposing level exists but RR < ``MIN_RR``.
+    - ``"grade_rejected"`` — graded but no quality tier matched.
+    - ``"killzone_gating"`` — MSS confirms past ``killzone_end``.
+
+    ``sweep_info`` carries enough context to replay the rejection in a
+    notebook: the sweep's symbol/timestamp/direction/level.
+    """
+
+    timestamp_utc: datetime
+    symbol: str
+    rejection_reason: str
+    sweep_info: dict | None = None
+
+
+@overload
 def build_setup_candidates(
     df_h4: pd.DataFrame,
     df_h1: pd.DataFrame,
@@ -197,7 +227,36 @@ def build_setup_candidates(
     target_date: date,
     symbol: str,
     settings: SetupSettings,
-) -> list[Setup]:
+    *,
+    return_rejected: Literal[False] = False,
+) -> list[Setup]: ...
+
+
+@overload
+def build_setup_candidates(
+    df_h4: pd.DataFrame,
+    df_h1: pd.DataFrame,
+    df_m5: pd.DataFrame,
+    df_d1: pd.DataFrame,
+    target_date: date,
+    symbol: str,
+    settings: SetupSettings,
+    *,
+    return_rejected: Literal[True],
+) -> tuple[list[Setup], list[RejectedCandidate]]: ...
+
+
+def build_setup_candidates(
+    df_h4: pd.DataFrame,
+    df_h1: pd.DataFrame,
+    df_m5: pd.DataFrame,
+    df_d1: pd.DataFrame,
+    target_date: date,
+    symbol: str,
+    settings: SetupSettings,
+    *,
+    return_rejected: bool = False,
+) -> list[Setup] | tuple[list[Setup], list[RejectedCandidate]]:
     """Build every setup candidate for one symbol on one trading day.
 
     Pipeline:
@@ -237,6 +296,7 @@ def build_setup_candidates(
     """
     instr_cfg = settings.INSTRUMENT_CONFIG[symbol]
     setups: list[Setup] = []
+    rejected: list[RejectedCandidate] = []
 
     for kz_name, kz_session in (
         ("london", settings.KILLZONE_LONDON),
@@ -290,7 +350,7 @@ def build_setup_candidates(
         sweeps = [s for s in sweeps if s.direction == bias]
 
         for sweep in sweeps:
-            setup = _try_build_setup(
+            outcome = _try_build_setup(
                 sweep=sweep,
                 bias=bias,
                 killzone=kz_name,
@@ -300,8 +360,10 @@ def build_setup_candidates(
                 levels=levels,
                 settings=settings,
             )
-            if setup is None:
+            if isinstance(outcome, RejectedCandidate):
+                rejected.append(outcome)
                 continue
+            setup = outcome  # type: Setup
 
             # Killzone gating per docs/01 §6: notifications must not fire
             # outside London/NY killzones. The detection pipeline can produce
@@ -318,10 +380,20 @@ def build_setup_candidates(
                     symbol,
                     kz_name,
                 )
+                rejected.append(
+                    RejectedCandidate(
+                        timestamp_utc=setup.timestamp_utc,
+                        symbol=symbol,
+                        rejection_reason="killzone_gating",
+                        sweep_info=_sweep_info(sweep),
+                    )
+                )
                 continue
 
             setups.append(setup)
 
+    if return_rejected:
+        return setups, rejected
     return setups
 
 
@@ -389,8 +461,13 @@ def _try_build_setup(
     instr_cfg: dict,
     levels: list[MarkedLevel],
     settings: SetupSettings,
-) -> Setup | None:
-    """Per-sweep pipeline — returns ``None`` if any stage rejects the candidate."""
+) -> Setup | RejectedCandidate:
+    """Per-sweep pipeline — returns either a ``Setup`` or a ``RejectedCandidate``.
+
+    Sprint 6: every rejection now carries a tagged reason so the scheduler
+    can journal it. The semantics for accepted setups are unchanged from
+    Sprint 4.
+    """
     mss = detect_mss(
         df_m5,
         sweep,
@@ -401,7 +478,7 @@ def _try_build_setup(
         max_lookforward_minutes=_MSS_LOOKFORWARD_MINUTES,
     )
     if mss is None:
-        return None
+        return _reject(sweep, symbol, "no_mss_after_sweep")
 
     # FVG search window — from MSS candle to a small forward horizon.
     # The displacement move is usually 1-3 candles around MSS; we look
@@ -436,7 +513,7 @@ def _try_build_setup(
         poi = ob
         poi_type = "OrderBlock"
     else:
-        return None
+        return _reject(sweep, symbol, "no_poi_found")
 
     # Trade plan.
     direction: Literal["long", "short"] = "long" if mss.direction == "bullish" else "short"
@@ -449,7 +526,7 @@ def _try_build_setup(
 
     risk = abs(entry - stop_loss)
     if risk <= 0:
-        return None
+        return _reject(sweep, symbol, "invalid_risk")
 
     tp_choice = _select_take_profit(
         direction=direction,
@@ -460,7 +537,10 @@ def _try_build_setup(
         min_rr=settings.MIN_RR,
     )
     if tp_choice is None:
-        return None
+        # Could be either no opposing level at all OR opposing level
+        # below MIN_RR. Distinguish for the journal.
+        reason = _no_opposing_or_low_rr(direction, entry, levels, sweep)
+        return _reject(sweep, symbol, reason)
     tp_runner_price, target_level_type, tp_runner_rr = tp_choice
 
     tp1_price, tp1_rr = _compute_tp1(
@@ -495,7 +575,7 @@ def _try_build_setup(
     )
     grade, confluences = grade_setup(components)
     if grade is None:
-        return None
+        return _reject(sweep, symbol, "grade_rejected")
 
     return Setup(
         timestamp_utc=mss.mss_confirm_candle_time_utc,
@@ -520,6 +600,56 @@ def _try_build_setup(
         quality=grade,
         confluences=confluences,
     )
+
+
+def _sweep_info(sweep: Sweep) -> dict:
+    """Lightweight context bundle for ``RejectedCandidate.sweep_info``."""
+    return {
+        "sweep_time_utc": sweep.sweep_candle_time_utc.isoformat(),
+        "swept_level_type": sweep.swept_level_type,
+        "swept_level_price": float(sweep.swept_level_price),
+        "direction": sweep.direction,
+    }
+
+
+def _reject(sweep: Sweep, symbol: str, reason: str) -> RejectedCandidate:
+    """Build a ``RejectedCandidate`` keyed off the sweep's confirmation time."""
+    return RejectedCandidate(
+        timestamp_utc=sweep.sweep_candle_time_utc,
+        symbol=symbol,
+        rejection_reason=reason,
+        sweep_info=_sweep_info(sweep),
+    )
+
+
+def _no_opposing_or_low_rr(
+    direction: Literal["long", "short"],
+    entry: float,
+    levels: list[MarkedLevel],
+    sweep: Sweep,
+) -> str:
+    """Discriminate between ``no_opposing_liquidity`` and ``rr_below_threshold``.
+
+    ``_select_take_profit`` returns ``None`` for both cases — we replay the
+    opposing-level filter to find out which one applies.
+    """
+    if direction == "long":
+        opposing = [
+            lv
+            for lv in levels
+            if lv.type == "high"
+            and lv.price > entry
+            and not (lv.label == sweep.swept_level_type and lv.price == sweep.swept_level_price)
+        ]
+    else:
+        opposing = [
+            lv
+            for lv in levels
+            if lv.type == "low"
+            and lv.price < entry
+            and not (lv.label == sweep.swept_level_type and lv.price == sweep.swept_level_price)
+        ]
+    return "rr_below_threshold" if opposing else "no_opposing_liquidity"
 
 
 def _compute_tp1(

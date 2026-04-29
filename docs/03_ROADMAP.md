@@ -213,11 +213,47 @@ without intervention. Paper trading (no real money).
 
 Deliverables:
 
-- [ ] `src/scheduler/runner.py` with APScheduler running the cycle
-- [ ] Robust logging (rotating file + Telegram errors)
-- [ ] Heartbeat at killzone start
-- [ ] Hard stops wired in (daily loss, max trades, news filter on/off)
-- [ ] Run for 2–3 weeks; collect data; review weekly
+- [x] Real `src/mt5_client/` (replaces stub) — `MT5Client` with connect /
+      shutdown / fetch_ohlc / get_account_info / get_recent_trades, plus
+      broker-time conversion (`time_conversion.py`) and exponential
+      backoff retry helper (`retry.py`). Mocked unit tests in
+      `tests/mt5_client/`.
+- [x] `src/scheduler/runner.py` with `AsyncIOScheduler` (chosen over
+      `BlockingScheduler` to co-locate the python-telegram-bot polling
+      loop in the same asyncio loop — see header docstring). Cron jobs:
+      detection cycle every `DETECTION_INTERVAL_MINUTES` during each
+      killzone, pre-killzone bias 5 min ahead, killzone open / close
+      heartbeats, daily outcome reconciliation at 23:00 Paris. Graceful
+      shutdown on SIGINT/SIGTERM.
+- [x] `src/scheduler/jobs.py` — pure functions (`run_detection_cycle`,
+      `run_pre_killzone_bias`, `run_outcome_reconciliation`,
+      `send_killzone_open_heartbeat`, `send_killzone_close_heartbeat`)
+      tested directly without the scheduler loop.
+- [x] `src/scheduler/hard_stops.py` — six checks per docs/05 (max-loss
+      critical → daily-loss reached → news → daily trade count →
+      consecutive SL → per-pair count). Single-fire daily-loss /
+      max-loss alerts via `daily_state.daily_stop_triggered`. Manual
+      `MAX_LOSS_OVERRIDE` setting required to lift max-loss suspension.
+- [x] Robust logging — rotating file (`logs/system.log`, 10 MB × 5),
+      console handler, per-module loggers; configured once in
+      `runner.py`.
+- [x] `src/notification/telegram_bot.py` extended with `send_text` /
+      `send_error` and per-message retry-3 inside `send_setup` (failures
+      logged but not raised — setups remain in journal).
+- [x] Detection orchestrator extension: `build_setup_candidates` now
+      accepts `return_rejected: bool = False` and exposes a
+      `RejectedCandidate` dataclass. Default keeps the Sprint 5 contract
+      intact — only the scheduler opts in. Rejection reasons:
+      `no_mss_after_sweep`, `no_poi_found`, `invalid_risk`,
+      `no_opposing_liquidity`, `rr_below_threshold`, `grade_rejected`,
+      `killzone_gating`. Resolves Sprint 5 deviation 1.
+- [x] `scripts/test_scheduler_dry_run.py` — Mac-friendly dry run with a
+      fixture-backed mock MT5 client and a recording (no-network)
+      Telegram notifier. Runs ONE cycle synchronously and prints the
+      report.
+- [x] `scripts/run_scheduler.py` — Windows-host launcher.
+- [ ] Run for 2–3 weeks; collect data; review weekly. *(Field test —
+      operator-driven; not covered by code deliverables.)*
 
 **Done when**: ≥ 2 weeks of paper trading data with no system crashes,
 ≥ 80% precision (notifications operator confirms as valid setups), and
@@ -246,15 +282,17 @@ without this layer and document the negative result.
 
 ## Current state
 
-- **Active sprint**: 6
-- **Last updated**: Sprint 5 closed 2026-04-28; SQLite journal shipped with
-  SQLAlchemy 2.0 schema, repository CRUD, outcome tracker (MT5 reconciliation),
-  and Streamlit dashboard. Telegram callback wired to journal persistence in
-  `scripts/test_notification.py`. Detection-pipeline persistence intentionally
-  deferred to Sprint 6 (scheduler wrapper) to keep `build_setup_candidates`
-  pure. `mt5_client` wrapper is still a stub — outcome tracker exercised via
-  mock client in unit tests; production reconciliation lights up once
-  Sprint 6 ships the MT5 client.
+- **Active sprint**: 6 closing → 7 standby
+- **Last updated**: Sprint 6 code-complete 2026-04-28. Real `MT5Client`
+  ships (replaces the stub), `AsyncIOScheduler`-driven runner registers
+  detection cycles, pre-killzone bias caching, killzone heartbeats, and
+  daily outcome reconciliation. Hard stops enforce all six docs/05 rules
+  with manual `MAX_LOSS_OVERRIDE` reset. `build_setup_candidates` now
+  optionally returns rejected candidates with tagged reasons; the
+  scheduler journals everything (resolves Sprint 5 deviation 1).
+  `scripts/test_scheduler_dry_run.py` validates the wiring on Mac
+  without MT5 / Telegram.
+  Field test (≥ 2 weeks paper trading) deferred to operator runtime.
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.

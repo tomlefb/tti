@@ -243,6 +243,35 @@ NEWS_BLACKOUT_TODAY = False
 
 DETECTION_INTERVAL_MINUTES = 5     # Run detection every 5 min during killzones.
 HEARTBEAT_AT_KILLZONE_START = True
+HEARTBEAT_AT_KILLZONE_CLOSE_IF_EMPTY = True
+
+# Lead time (minutes before a killzone start) at which the pre-killzone
+# bias job runs. Computed values are cached into daily_state and surfaced
+# in the killzone-open heartbeat.
+PRE_KILLZONE_BIAS_LEAD_MINUTES = 5
+
+# Daily outcome reconciliation runs once at this Paris-local hour.
+OUTCOME_RECONCILIATION_HOUR_PARIS = 23
+
+# -----------------------------------------------------------------------------
+# MT5 robustness (Sprint 6)
+# -----------------------------------------------------------------------------
+
+# Exponential-backoff parameters for fetch_ohlc and get_recent_trades.
+# Defaults yield retry delays of 1s, 2s, 4s, 8s, 16s ⇒ 31s total before
+# the cycle gives up and logs an error. Connect failures are NOT retried —
+# the scheduler bootstrap aborts.
+MT5_RETRY_MAX_ATTEMPTS = 5
+MT5_RETRY_BASE_DELAY_SECONDS = 1.0
+
+# -----------------------------------------------------------------------------
+# Manual safety override (Sprint 6)
+# -----------------------------------------------------------------------------
+
+# Set to True ONLY after the operator has manually reviewed a
+# max-loss-critical breach and decided to resume. The hard-stops layer
+# refuses to lift the suspension on its own — see docs/05 §"Hard stops".
+MAX_LOSS_OVERRIDE = False
 
 # -----------------------------------------------------------------------------
 # Logging
