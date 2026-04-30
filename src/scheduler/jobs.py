@@ -55,6 +55,7 @@ class CycleReport:
 
     pairs_processed: int = 0
     setups_detected: int = 0
+    setups_notifiable: int = 0  # subset of detected that pass the quality filter
     setups_notified: int = 0
     setups_rejected: int = 0
     blocks: dict[str, str] = field(default_factory=dict)  # pair → BlockReason.code
@@ -184,10 +185,23 @@ def run_detection_cycle(
             report.setups_detected += len(setups)
             report.setups_rejected += len(rejected)
 
-            with journal_session_factory() as session:
-                _persist_setups(session, setups, rejected, now_utc=now_utc)
+            # Quality gating (Sprint 6.5): A+/A reach Telegram, B is
+            # journaled-only. Default to A+/A if NOTIFY_QUALITIES absent
+            # so older configs still behave conservatively.
+            allowed_qualities = set(getattr(settings, "NOTIFY_QUALITIES", ("A+", "A")))
+            notifiable_setups = [s for s in setups if s.quality in allowed_qualities]
+            report.setups_notifiable += len(notifiable_setups)
 
-            for setup in setups:
+            with journal_session_factory() as session:
+                _persist_setups(
+                    session,
+                    setups,
+                    rejected,
+                    now_utc=now_utc,
+                    notifiable_setups=notifiable_setups,
+                )
+
+            for setup in notifiable_setups:
                 ok = _send_setup_notification(
                     setup, df_m5, settings, notifier, chart_send_callback=chart_send_callback
                 )
@@ -202,10 +216,11 @@ def run_detection_cycle(
             report.errors[pair] = repr(exc)
 
     logger.info(
-        "cycle complete: %d pairs, %d setups detected, %d notified, %d rejected, "
-        "%d blocked, %d errors",
+        "cycle complete: %d pairs, %d setups detected (%d notifiable, %d notified), "
+        "%d rejected, %d blocked, %d errors",
         report.pairs_processed,
         report.setups_detected,
+        report.setups_notifiable,
         report.setups_notified,
         report.setups_rejected,
         len(report.blocks),
@@ -220,10 +235,19 @@ def _persist_setups(
     rejected: list[RejectedCandidate],
     *,
     now_utc: datetime,
+    notifiable_setups: list[Setup] | None = None,
 ) -> None:
-    """Insert accepted + rejected candidates idempotently."""
+    """Insert accepted + rejected candidates idempotently.
+
+    ``was_notified`` is set per the quality gate: setups present in
+    ``notifiable_setups`` are flagged ``True``; B-grade detections that
+    were filtered out at notification time are flagged ``False`` so the
+    operator can audit them later via the journal.
+    """
+    notifiable_ids = {id(s) for s in notifiable_setups} if notifiable_setups is not None else None
     for setup in setups:
-        insert_setup(session, setup, was_notified=True, detected_at=now_utc)
+        was_notified = True if notifiable_ids is None else id(setup) in notifiable_ids
+        insert_setup(session, setup, was_notified=was_notified, detected_at=now_utc)
     for r in rejected:
         # Build a synthetic Setup-shaped row for journaling rejected candidates.
         # The journal schema requires several setup-only fields (entry, SL, TPs,
@@ -556,5 +580,11 @@ def _killzone_session(
 
 def _pair_short(pair: str) -> str:
     """Three-letter shorthand for heartbeat formatting."""
-    aliases = {"XAUUSD": "XAU", "NDX100": "NDX", "EURUSD": "EUR", "GBPUSD": "GBP"}
+    aliases = {
+        "XAUUSD": "XAU",
+        "NDX100": "NDX",
+        "EURUSD": "EUR",
+        "GBPUSD": "GBP",
+        "ETHUSD": "ETH",
+    }
     return aliases.get(pair, pair[:3])

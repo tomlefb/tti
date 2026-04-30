@@ -40,6 +40,7 @@ _TZ_UTC = ZoneInfo("UTC")
 def _settings(**overrides) -> SimpleNamespace:
     base = dict(
         WATCHED_PAIRS=["XAUUSD", "EURUSD"],
+        NOTIFY_QUALITIES=["A+", "A"],
         SESSION_ASIA=(2, 0, 6, 0),
         KILLZONE_LONDON=(9, 0, 12, 0),
         KILLZONE_NY=(15, 30, 18, 0),
@@ -80,6 +81,7 @@ def _settings(**overrides) -> SimpleNamespace:
         INSTRUMENT_CONFIG={
             "XAUUSD": {"sweep_buffer": 1.0, "equal_hl_tolerance": 0.5, "sl_buffer": 1.0},
             "EURUSD": {"sweep_buffer": 0.0005, "equal_hl_tolerance": 0.0003, "sl_buffer": 0.0005},
+            "ETHUSD": {"sweep_buffer": 1.18, "equal_hl_tolerance": 0.79, "sl_buffer": 1.18},
         },
     )
     base.update(overrides)
@@ -352,7 +354,154 @@ def test_killzone_close_heartbeat_only_if_empty(factory, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _make_test_setup(symbol: str, ts: datetime, *, kz: str) -> Setup:
+# ---------------------------------------------------------------------------
+# Sprint 6.5 — quality gating + ETH config
+# ---------------------------------------------------------------------------
+
+
+def test_run_detection_cycle_only_notifies_a_grades(factory, monkeypatch):
+    """Mixed A/A+/B detection: only A+/A reach the notifier; all are
+    persisted. B-grade setups land in the journal with
+    ``was_notified=False`` so the operator can audit them later."""
+    settings = _settings()
+    now_utc = datetime(2026, 4, 28, 14, 0, tzinfo=UTC)
+    mt5 = _MockMt5()
+    notifier = _make_notifier()
+
+    ts_a_plus = datetime(2026, 4, 28, 14, 0, tzinfo=UTC)
+    ts_a = datetime(2026, 4, 28, 14, 5, tzinfo=UTC)
+    ts_b = datetime(2026, 4, 28, 14, 10, tzinfo=UTC)
+    setup_a_plus = _make_test_setup("XAUUSD", ts_a_plus, kz="ny", quality="A+")
+    setup_a = _make_test_setup("XAUUSD", ts_a, kz="ny", quality="A")
+    setup_b = _make_test_setup("XAUUSD", ts_b, kz="ny", quality="B")
+
+    def fake_build(*args, **kwargs):
+        if kwargs.get("symbol") == "XAUUSD":
+            return [setup_a_plus, setup_a, setup_b], []
+        return [], []
+
+    monkeypatch.setattr(jobs_module, "build_setup_candidates", fake_build)
+
+    captured: list[Setup] = []
+    report = run_detection_cycle(
+        mt5,
+        factory,
+        notifier,
+        settings,
+        now_utc=now_utc,
+        chart_send_callback=lambda s, p: captured.append(s),
+    )
+
+    # Only A+/A pushed through the notifier.
+    assert len(captured) == 2
+    assert {s.quality for s in captured} == {"A+", "A"}
+    assert report.setups_detected == 3
+    assert report.setups_notifiable == 2
+    assert report.setups_notified == 2
+
+    # All three persisted.
+    with session_scope(get_engine_for(factory)) as s:
+        rows = s.query(SetupRow).filter(SetupRow.symbol == "XAUUSD").all()
+        by_quality = {r.quality: r for r in rows if not r.setup_uid.startswith("rejected:")}
+        assert set(by_quality.keys()) == {"A+", "A", "B"}
+        assert by_quality["A+"].was_notified is True
+        assert by_quality["A"].was_notified is True
+        assert by_quality["B"].was_notified is False
+
+
+def test_b_grade_setup_persisted_with_was_notified_false(factory, monkeypatch):
+    """Edge case: only a B-grade is detected. It must still land in the
+    journal (so audit trails remain complete) but not reach the notifier."""
+    settings = _settings()
+    now_utc = datetime(2026, 4, 28, 14, 0, tzinfo=UTC)
+    mt5 = _MockMt5()
+    notifier = _make_notifier()
+
+    setup_b = _make_test_setup(
+        "XAUUSD", datetime(2026, 4, 28, 14, 0, tzinfo=UTC), kz="ny", quality="B"
+    )
+
+    def fake_build(*args, **kwargs):
+        if kwargs.get("symbol") == "XAUUSD":
+            return [setup_b], []
+        return [], []
+
+    monkeypatch.setattr(jobs_module, "build_setup_candidates", fake_build)
+
+    captured: list[Setup] = []
+    report = run_detection_cycle(
+        mt5,
+        factory,
+        notifier,
+        settings,
+        now_utc=now_utc,
+        chart_send_callback=lambda s, p: captured.append(s),
+    )
+
+    assert captured == []
+    assert report.setups_detected == 1
+    assert report.setups_notifiable == 0
+    assert report.setups_notified == 0
+
+    with session_scope(get_engine_for(factory)) as s:
+        rows = [
+            r
+            for r in s.query(SetupRow).filter(SetupRow.symbol == "XAUUSD").all()
+            if not r.setup_uid.startswith("rejected:")
+        ]
+        assert len(rows) == 1
+        assert rows[0].quality == "B"
+        assert rows[0].was_notified is False
+
+
+def test_eth_setups_detected_with_atr_fraction_buffers(factory, monkeypatch):
+    """Smoke test that ETHUSD config flows through the cycle without
+    crashing — uses the ATR-fraction buffers from settings.py.example."""
+    settings = _settings(WATCHED_PAIRS=["ETHUSD"])
+    now_utc = datetime(2026, 4, 28, 14, 0, tzinfo=UTC)
+    mt5 = _MockMt5()
+    notifier = _make_notifier()
+
+    eth_setup = _make_test_setup(
+        "ETHUSD",
+        datetime(2026, 4, 28, 14, 0, tzinfo=UTC),
+        kz="ny",
+        quality="A",
+    )
+
+    captured_settings: list = []
+
+    def fake_build(*args, **kwargs):
+        captured_settings.append(kwargs.get("settings"))
+        if kwargs.get("symbol") == "ETHUSD":
+            return [eth_setup], []
+        return [], []
+
+    monkeypatch.setattr(jobs_module, "build_setup_candidates", fake_build)
+
+    captured: list[Setup] = []
+    report = run_detection_cycle(
+        mt5,
+        factory,
+        notifier,
+        settings,
+        now_utc=now_utc,
+        chart_send_callback=lambda s, p: captured.append(s),
+    )
+
+    assert report.pairs_processed == 1
+    assert report.setups_detected == 1
+    assert report.setups_notified == 1
+    assert captured[0].symbol == "ETHUSD"
+    # The settings the orchestrator received contains the ETHUSD entry.
+    assert "ETHUSD" in captured_settings[0].INSTRUMENT_CONFIG
+    eth_cfg = captured_settings[0].INSTRUMENT_CONFIG["ETHUSD"]
+    assert eth_cfg["sweep_buffer"] > 0
+    assert eth_cfg["sl_buffer"] > 0
+    assert eth_cfg["equal_hl_tolerance"] > 0
+
+
+def _make_test_setup(symbol: str, ts: datetime, *, kz: str, quality: str = "A") -> Setup:
     sweep = Sweep(
         direction="bullish",
         swept_level_price=99.5,
@@ -403,6 +552,6 @@ def _make_test_setup(symbol: str, ts: datetime, *, kz: str) -> Setup:
         tp_runner_rr=6.0,
         tp1_price=117.0,
         tp1_rr=5.0,
-        quality="A",
+        quality=quality,  # type: ignore[arg-type]
         confluences=[],
     )

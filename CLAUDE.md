@@ -41,6 +41,17 @@ mechanical filter.
    decided. Missed setups must be debuggable after the fact.
 8. **Funded Next account is at risk.** Hard-code drawdown limits as a
    safety layer (system stops sending notifications if daily loss exceeded).
+9. **Validated WATCHED_PAIRS.** The system trades XAUUSD + NDX100 + ETHUSD
+   only. These are the three instruments validated via backtest on extended
+   fixtures (Sprint 6.5). Other instruments tested (USOUSD, US30, GER30,
+   SPX500, BTCUSD, USDJPY, XAGUSD) all dropped due to insufficient or
+   negative edge. See
+   `calibration/runs/2026-04-29T*_grid_search_extended_fast*.md` for the
+   validation report. Do not add pairs without re-running the validation.
+10. **Notification gating by quality.** `NOTIFY_QUALITIES = ["A+", "A"]`
+    is the live-deployment default — B-grade detections are still produced
+    by the orchestrator and journaled (`was_notified=False`) so the
+    operator can audit false negatives, but they do not push to Telegram.
 
 For the full rule set, see `docs/04_PROJECT_RULES.md`.
 

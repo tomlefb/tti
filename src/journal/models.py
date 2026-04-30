@@ -151,6 +151,8 @@ class DailyStateRow(Base):
     bias_eurusd_ny: Mapped[str | None] = mapped_column(String, nullable=True)
     bias_gbpusd_london: Mapped[str | None] = mapped_column(String, nullable=True)
     bias_gbpusd_ny: Mapped[str | None] = mapped_column(String, nullable=True)
+    bias_ethusd_london: Mapped[str | None] = mapped_column(String, nullable=True)
+    bias_ethusd_ny: Mapped[str | None] = mapped_column(String, nullable=True)
 
     trades_taken_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     consecutive_sl_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

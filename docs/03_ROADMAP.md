@@ -280,19 +280,74 @@ without this layer and document the negative result.
 
 ---
 
+## Sprint 6.5 — Portfolio validation + live deployment configuration
+
+**Goal**: lock the live `WATCHED_PAIRS` and notification gating based
+on extended-fixture backtest validation, then run paper trading.
+
+Deliverables:
+
+- [x] Extended-fixture backtest on the original 4 pairs and 8 candidates
+      (`calibration/run_extended_backtest.py`,
+      `calibration/run_extended_backtest_atr.py`).
+- [x] Per-instrument grid search with strict 70/30 train/holdout split
+      and anti-overfit flags (`calibration/run_grid_search_per_instrument.py`,
+      `calibration/run_grid_search_extended_fast.py`,
+      `calibration/run_grid_search_extended_fast_part2.py`).
+- [x] Verdict on 12 instruments: **XAUUSD, NDX100, ETHUSD** ship.
+      EURUSD, GBPUSD, USOUSD, US30, GER30, SPX500, BTCUSD, USDJPY, XAGUSD
+      all DROP — strategy doesn't generalize to those markets even with
+      grid-tuned parameters. ETHUSD ships via `DEFAULT_SHIPS` verdict
+      (default holdout +0.526R / 35 setups; the grid's best-train
+      flagged SUSPICIOUS due to overfit risk).
+- [x] `config/settings.py.example`: `WATCHED_PAIRS` reduced to the three
+      validated pairs, `NOTIFY_QUALITIES = ["A+", "A"]` added,
+      ETHUSD ATR-derived buffers added to `INSTRUMENT_CONFIG`.
+- [x] `src/scheduler/jobs.py`: notification gating by quality (A+/A
+      reach Telegram, B journaled with `was_notified=False`).
+      `CycleReport.setups_notifiable` added.
+- [x] `daily_state` schema gains `bias_ethusd_london` /
+      `bias_ethusd_ny` columns so heartbeats surface ETH bias.
+- [x] `tests/scheduler/test_jobs.py`: quality-gating + ETH-config
+      smoke tests.
+- [ ] Field test (≥ 4-6 weeks paper trading on the validated portfolio)
+      — operator-driven.
+
+**Done when**: paper trading runs autonomously for ≥ 4 weeks on
+XAU+NDX+ETH with A+/A-only notifications, journal accumulates B-grade
+audit trail, and the operator has enough live data to evaluate Sprint 7
+LLM-qualifier ROI.
+
+---
+
 ## Current state
 
-- **Active sprint**: 6 closing → 7 standby
-- **Last updated**: Sprint 6 code-complete 2026-04-28. Real `MT5Client`
-  ships (replaces the stub), `AsyncIOScheduler`-driven runner registers
-  detection cycles, pre-killzone bias caching, killzone heartbeats, and
-  daily outcome reconciliation. Hard stops enforce all six docs/05 rules
-  with manual `MAX_LOSS_OVERRIDE` reset. `build_setup_candidates` now
-  optionally returns rejected candidates with tagged reasons; the
-  scheduler journals everything (resolves Sprint 5 deviation 1).
-  `scripts/test_scheduler_dry_run.py` validates the wiring on Mac
-  without MT5 / Telegram.
-  Field test (≥ 2 weeks paper trading) deferred to operator runtime.
+- **Active sprint**: 6.5 — live paper trading on validated portfolio
+  (XAUUSD, NDX100, ETHUSD), A-grade-only notifications. Sprint 7
+  (LLM qualifier) deferred until 4-6 weeks of live data collected.
+- **Last updated**: Sprint 6.5 deployment configuration complete
+  2026-04-30. Two grid search sessions on extended fixtures (16-25 mo)
+  cleared the portfolio: only XAU/NDX/ETH passed the SHIP / DEFAULT_SHIPS
+  bar. Notification gating shipped (A+/A only); B-grade setups remain
+  in the journal with `was_notified=False` for false-negative audits.
+  Sprint 6 field test rolls into Sprint 6.5 paper trading on the
+  reduced portfolio.
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.
+
+---
+
+## Backlog (non-blocking)
+
+- **mt5_client time-conversion test drift**:
+  `tests/mt5_client/test_client.py::test_fetch_ohlc_converts_timestamps_to_utc_using_broker_offset`
+  and `test_fetch_ohlc_handles_volume_fallback_chain` fail when run on dates
+  significantly past the hardcoded fixture base, with
+  `ValueError: offset must be a timedelta strictly between -24h and +24h`.
+  Pre-existing — the offset computation in the test scaffolding accumulates
+  the difference between today's date and the fixture's anchor as an
+  hours offset rather than treating it as a date delta. Not user-facing;
+  the production `time_conversion.py` is correct under realistic broker
+  offsets. Fix in a small follow-up: rewrite the fixture to anchor
+  relative to "now" or use a `freezegun`-style time pin.
