@@ -471,6 +471,171 @@ class MT5Client:
             return False
         return True
 
+    def get_open_positions(self, magic: int | None = None) -> list[PositionSnapshot]:
+        """List open positions, optionally filtered by magic number."""
+        self._require_connected()
+        positions = self._mt5.positions_get()
+        if not positions:
+            return []
+        offset = self._require_offset()
+        out: list[PositionSnapshot] = []
+        for p in positions:
+            p_magic = int(getattr(p, "magic", 0))
+            if magic is not None and p_magic != int(magic):
+                continue
+            ptype = int(getattr(p, "type", 0))
+            direction = "long" if ptype == 0 else "short"
+            t_seconds = float(getattr(p, "time", 0))
+            time_open_utc = broker_naive_seconds_to_utc(t_seconds, offset)
+            out.append(
+                PositionSnapshot(
+                    ticket=int(getattr(p, "ticket", 0)),
+                    symbol=str(getattr(p, "symbol", "")),
+                    direction=direction,
+                    volume=float(getattr(p, "volume", 0.0)),
+                    entry_price=float(getattr(p, "price_open", 0.0)),
+                    sl=float(getattr(p, "sl", 0.0)),
+                    tp=float(getattr(p, "tp", 0.0)),
+                    magic=p_magic,
+                    time_open_utc=time_open_utc,
+                    profit=float(getattr(p, "profit", 0.0)),
+                )
+            )
+        return out
+
+    def get_pending_orders(
+        self, magic: int | None = None
+    ) -> list[PendingOrderSnapshot]:
+        """List pending orders, optionally filtered by magic number."""
+        self._require_connected()
+        orders = self._mt5.orders_get()
+        if not orders:
+            return []
+        offset = self._require_offset()
+        buy_limit = int(getattr(self._mt5, "ORDER_TYPE_BUY_LIMIT", 2))
+        out: list[PendingOrderSnapshot] = []
+        for o in orders:
+            o_magic = int(getattr(o, "magic", 0))
+            if magic is not None and o_magic != int(magic):
+                continue
+            otype = int(getattr(o, "type", 0))
+            direction = "long" if otype == buy_limit else "short"
+            t_seconds = float(getattr(o, "time_setup", 0))
+            time_setup_utc = broker_naive_seconds_to_utc(t_seconds, offset)
+            volume = float(
+                getattr(o, "volume_initial", getattr(o, "volume_current", 0.0))
+            )
+            out.append(
+                PendingOrderSnapshot(
+                    ticket=int(getattr(o, "ticket", 0)),
+                    symbol=str(getattr(o, "symbol", "")),
+                    direction=direction,
+                    volume=volume,
+                    price_open=float(getattr(o, "price_open", 0.0)),
+                    sl=float(getattr(o, "sl", 0.0)),
+                    tp=float(getattr(o, "tp", 0.0)),
+                    magic=o_magic,
+                    time_setup_utc=time_setup_utc,
+                )
+            )
+        return out
+
+    def close_partial_position(self, *, ticket: int, volume: float) -> bool:
+        """Close ``volume`` lots of an open position at market.
+
+        Used by the lifecycle to realise the TP1 partial exit (50% by
+        default). The closing order is the OPPOSITE side at market price:
+        SELL closes a long, BUY closes a short.
+
+        Returns ``False`` when the ticket is not open, the symbol_info
+        tick is unavailable, or the broker rejects the deal.
+        """
+        self._require_connected()
+        positions = self._mt5.positions_get()
+        if not positions:
+            return False
+        match = None
+        for p in positions:
+            if int(getattr(p, "ticket", -1)) == int(ticket):
+                match = p
+                break
+        if match is None:
+            logger.warning(
+                "close_partial_position: ticket=%d not found among open positions",
+                ticket,
+            )
+            return False
+
+        symbol = str(getattr(match, "symbol", ""))
+        ptype = int(getattr(match, "type", 0))
+        # Opposite-side market deal closes (or reduces) the position.
+        if ptype == 0:  # long position → SELL to close
+            close_type = self._mt5.ORDER_TYPE_SELL
+            tick = self._mt5.symbol_info_tick(symbol)
+            close_price = float(getattr(tick, "bid", 0.0)) if tick else 0.0
+        else:  # short position → BUY to close
+            close_type = self._mt5.ORDER_TYPE_BUY
+            tick = self._mt5.symbol_info_tick(symbol)
+            close_price = float(getattr(tick, "ask", 0.0)) if tick else 0.0
+
+        request = {
+            "action": self._mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": float(volume),
+            "type": close_type,
+            "position": int(ticket),
+            "price": close_price,
+            "magic": int(getattr(match, "magic", 0)),
+            "comment": "sprint7:partial",
+        }
+        result = self._mt5.order_send(request)
+        if result is None:
+            logger.error("close_partial_position(%d): order_send returned None", ticket)
+            return False
+        retcode = int(getattr(result, "retcode", 0))
+        if retcode != 10009:
+            logger.warning(
+                "close_partial_position(%d) retcode=%d comment=%r",
+                ticket,
+                retcode,
+                getattr(result, "comment", ""),
+            )
+            return False
+        return True
+
+    def get_position_close_info(self, ticket: int) -> dict[str, Any] | None:
+        """Return ``{exit_price, exit_time_utc, profit_usd}`` for a closed
+        position, or ``None`` if no exit deal exists yet.
+
+        Reads from ``mt5.history_deals_get`` filtering on the position id.
+        Multiple exit deals (partial closes followed by a final close) are
+        summed for ``profit_usd``; the LAST exit deal's price is used as
+        the exit price.
+        """
+        self._require_connected()
+        # Pull a wide history window — broker time, but
+        # history_deals_get() with ticket filter is cheaper than a date
+        # scan, so just call without bounds.
+        deals = self._mt5.history_deals_get()
+        if not deals:
+            return None
+        offset = self._require_offset()
+        exits = [
+            d for d in deals
+            if int(getattr(d, "position_id", 0)) == int(ticket)
+            and int(getattr(d, "entry", 0)) == 1
+        ]
+        if not exits:
+            return None
+        exits.sort(key=lambda d: float(getattr(d, "time", 0)))
+        last = exits[-1]
+        exit_seconds = float(getattr(last, "time", 0))
+        return {
+            "exit_price": float(getattr(last, "price", 0.0)),
+            "exit_time_utc": broker_naive_seconds_to_utc(exit_seconds, offset),
+            "profit_usd": float(sum(float(getattr(d, "profit", 0.0)) for d in exits)),
+        }
+
     def modify_position_sl(self, *, ticket: int, new_sl: float) -> bool:
         """Move SL on an open position. TP is preserved.
 

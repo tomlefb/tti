@@ -244,3 +244,222 @@ def test_modify_position_sl_unknown_ticket_returns_false():
     mt5.positions_get.return_value = []
     client = _connected_client(mt5)
     assert client.modify_position_sl(ticket=999, new_sl=1.0) is False
+
+
+# -----------------------------------------------------------------------------
+# get_open_positions / get_pending_orders
+# -----------------------------------------------------------------------------
+
+
+def test_get_open_positions_filters_by_magic():
+    mt5 = MagicMock()
+    real_now_utc = datetime.now(tz=UTC).replace(microsecond=0)
+    # Two positions, one ours (magic 7766), one not.
+    mt5.positions_get.return_value = [
+        SimpleNamespace(
+            ticket=42,
+            symbol="XAUUSD",
+            type=1,
+            volume=0.05,
+            price_open=4360.0,
+            sl=4375.0,
+            tp=4080.5,
+            magic=7766,
+            time=int(real_now_utc.timestamp()),
+            profit=15.5,
+        ),
+        SimpleNamespace(
+            ticket=43,
+            symbol="EURUSD",
+            type=0,
+            volume=0.1,
+            price_open=1.07,
+            sl=1.06,
+            tp=1.08,
+            magic=9999,
+            time=int(real_now_utc.timestamp()),
+            profit=-5.0,
+        ),
+    ]
+    client = _connected_client(mt5)
+
+    out = client.get_open_positions(magic=7766)
+    assert len(out) == 1
+    assert out[0].ticket == 42
+    assert out[0].direction == "short"
+    assert out[0].magic == 7766
+
+
+def test_get_open_positions_no_magic_returns_all():
+    mt5 = MagicMock()
+    real_now_utc = datetime.now(tz=UTC).replace(microsecond=0)
+    mt5.positions_get.return_value = [
+        SimpleNamespace(
+            ticket=42,
+            symbol="XAUUSD",
+            type=0,
+            volume=0.05,
+            price_open=4360.0,
+            sl=4350.0,
+            tp=4400.0,
+            magic=7766,
+            time=int(real_now_utc.timestamp()),
+            profit=0.0,
+        ),
+        SimpleNamespace(
+            ticket=43,
+            symbol="EURUSD",
+            type=1,
+            volume=0.1,
+            price_open=1.07,
+            sl=1.08,
+            tp=1.06,
+            magic=9999,
+            time=int(real_now_utc.timestamp()),
+            profit=0.0,
+        ),
+    ]
+    client = _connected_client(mt5)
+
+    out = client.get_open_positions()
+    assert len(out) == 2
+
+
+def test_get_pending_orders_filters_by_magic():
+    mt5 = MagicMock()
+    real_now_utc = datetime.now(tz=UTC).replace(microsecond=0)
+    mt5.orders_get.return_value = [
+        SimpleNamespace(
+            ticket=100,
+            symbol="XAUUSD",
+            type=3,  # SELL_LIMIT
+            volume_initial=0.05,
+            price_open=4360.0,
+            sl=4375.0,
+            tp=4080.5,
+            magic=7766,
+            time_setup=int(real_now_utc.timestamp()),
+        ),
+        SimpleNamespace(
+            ticket=101,
+            symbol="EURUSD",
+            type=2,
+            volume_initial=0.1,
+            price_open=1.07,
+            sl=1.06,
+            tp=1.08,
+            magic=9999,
+            time_setup=int(real_now_utc.timestamp()),
+        ),
+    ]
+    # The client maps SELL_LIMIT (3) → "short", BUY_LIMIT (2) → "long".
+    mt5.ORDER_TYPE_BUY_LIMIT = 2
+    mt5.ORDER_TYPE_SELL_LIMIT = 3
+    client = _connected_client(mt5)
+
+    out = client.get_pending_orders(magic=7766)
+    assert len(out) == 1
+    assert out[0].ticket == 100
+    assert out[0].direction == "short"
+
+
+# -----------------------------------------------------------------------------
+# close_partial_position
+# -----------------------------------------------------------------------------
+
+
+def test_close_partial_position_sends_market_close_for_short():
+    """Closing half of a short position = BUY market order with `position`
+    field pointing to our ticket."""
+    mt5 = MagicMock()
+    real_now_utc = datetime.now(tz=UTC).replace(microsecond=0)
+    mt5.positions_get.return_value = [
+        SimpleNamespace(
+            ticket=42,
+            symbol="XAUUSD",
+            type=1,  # SELL — we're short
+            volume=0.05,
+            price_open=4360.0,
+            sl=4375.0,
+            tp=4080.5,
+            magic=7766,
+            time=int(real_now_utc.timestamp()),
+            profit=0.0,
+        )
+    ]
+    mt5.order_send.return_value = SimpleNamespace(retcode=10009, comment="Done")
+    mt5.symbol_info_tick.return_value = SimpleNamespace(
+        bid=4280.0,
+        ask=4280.5,
+        time=real_now_utc.timestamp() + 3 * 3600,
+    )
+    mt5.TRADE_ACTION_DEAL = 1
+    mt5.ORDER_TYPE_BUY = 0
+    mt5.ORDER_TYPE_SELL = 1
+    client = _connected_client(mt5)
+
+    ok = client.close_partial_position(ticket=42, volume=0.025)
+    assert ok is True
+
+    args, _ = mt5.order_send.call_args
+    request = args[0]
+    assert request["action"] == mt5.TRADE_ACTION_DEAL
+    assert request["position"] == 42
+    assert request["volume"] == 0.025
+    # BUY to close a SHORT position.
+    assert request["type"] == mt5.ORDER_TYPE_BUY
+
+
+def test_close_partial_position_unknown_ticket_returns_false():
+    mt5 = MagicMock()
+    mt5.positions_get.return_value = []
+    client = _connected_client(mt5)
+    assert client.close_partial_position(ticket=999, volume=0.025) is False
+
+
+# -----------------------------------------------------------------------------
+# get_position_close_info
+# -----------------------------------------------------------------------------
+
+
+def test_get_position_close_info_extracts_exit_price_and_profit():
+    """When a position has been closed, history_deals_get returns the
+    exit deal(s); the helper returns exit_price + profit_usd."""
+    mt5 = MagicMock()
+    real_now_utc = datetime.now(tz=UTC).replace(microsecond=0)
+    entry_seconds = real_now_utc.timestamp() + 3 * 3600 - 600  # 10 min ago broker-naive
+    exit_seconds = real_now_utc.timestamp() + 3 * 3600
+    mt5.history_deals_get.return_value = [
+        SimpleNamespace(
+            position_id=42,
+            symbol="XAUUSD",
+            type=1,
+            entry=0,  # IN
+            time=entry_seconds,
+            price=4360.0,
+            profit=0.0,
+        ),
+        SimpleNamespace(
+            position_id=42,
+            symbol="XAUUSD",
+            type=0,
+            entry=1,  # OUT
+            time=exit_seconds,
+            price=4080.0,
+            profit=125.0,
+        ),
+    ]
+    client = _connected_client(mt5)
+
+    info = client.get_position_close_info(42)
+    assert info is not None
+    assert info["exit_price"] == 4080.0
+    assert info["profit_usd"] == 125.0
+    assert info["exit_time_utc"] is not None
+
+
+def test_get_position_close_info_returns_none_for_unknown_ticket():
+    mt5 = MagicMock()
+    mt5.history_deals_get.return_value = []
+    client = _connected_client(mt5)
+    assert client.get_position_close_info(999) is None
