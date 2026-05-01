@@ -229,6 +229,7 @@ def build_setup_candidates(
     settings: SetupSettings,
     *,
     return_rejected: Literal[False] = False,
+    now_utc: datetime | None = None,
 ) -> list[Setup]: ...
 
 
@@ -243,6 +244,7 @@ def build_setup_candidates(
     settings: SetupSettings,
     *,
     return_rejected: Literal[True],
+    now_utc: datetime | None = None,
 ) -> tuple[list[Setup], list[RejectedCandidate]]: ...
 
 
@@ -256,6 +258,7 @@ def build_setup_candidates(
     settings: SetupSettings,
     *,
     return_rejected: bool = False,
+    now_utc: datetime | None = None,
 ) -> list[Setup] | tuple[list[Setup], list[RejectedCandidate]]:
     """Build every setup candidate for one symbol on one trading day.
 
@@ -289,6 +292,15 @@ def build_setup_candidates(
         symbol: instrument label, e.g. ``"NDX100"``. Must be a key in
             ``settings.INSTRUMENT_CONFIG``.
         settings: any object satisfying the ``SetupSettings`` protocol.
+        now_utc: optional production scheduler tick. When set, every
+            forward-looking sub-search (FVG c3 closure, sweep return
+            candle closure, sweep dedupe pool) is bounded to data
+            observable at ``now_utc``. ``None`` (default) is the legacy
+            unconstrained mode. The look-ahead audit at
+            calibration/runs/FINAL_lookahead_audit_2026-05-01.md
+            documents the leakage that motivated this parameter; the
+            production scheduler and the audit harness pass
+            ``now_utc = next_5min_tick_after(mss_confirm)`` to disable it.
 
     Returns:
         ``list[Setup]`` (possibly empty) ordered by killzone (London first)
@@ -359,6 +371,7 @@ def build_setup_candidates(
                 instr_cfg=instr_cfg,
                 levels=levels,
                 settings=settings,
+                now_utc=now_utc,
             )
             if isinstance(outcome, RejectedCandidate):
                 rejected.append(outcome)
@@ -461,6 +474,7 @@ def _try_build_setup(
     instr_cfg: dict,
     levels: list[MarkedLevel],
     settings: SetupSettings,
+    now_utc: datetime | None = None,
 ) -> Setup | RejectedCandidate:
     """Per-sweep pipeline — returns either a ``Setup`` or a ``RejectedCandidate``.
 
@@ -483,10 +497,16 @@ def _try_build_setup(
     # FVG search window — from MSS candle to a small forward horizon.
     # The displacement move is usually 1-3 candles around MSS; we look
     # 6 M5 candles forward to catch FVGs that crystallise just after.
+    # When ``now_utc`` is provided, cap the forward horizon so the FVG
+    # search cannot reach candles whose data the production scheduler
+    # has not yet observed (the "+30min" bound assumed the historical
+    # backtest had unrestricted future access — see audit findings).
     fvg_window_start = mss.displacement_candle_time_utc
     fvg_window_end = mss.mss_confirm_candle_time_utc + pd.Timedelta(
         minutes=_FVG_LOOKFORWARD_FROM_MSS_MINUTES
     )
+    if now_utc is not None:
+        fvg_window_end = min(fvg_window_end, pd.Timestamp(now_utc))
     fvgs = detect_fvgs_in_window(
         df_m5,
         start_time_utc=fvg_window_start.replace(microsecond=0),
@@ -498,6 +518,7 @@ def _try_build_setup(
         direction=mss.direction,
         min_size_atr_mult=settings.FVG_MIN_SIZE_ATR_MULTIPLIER,
         atr_period=settings.FVG_ATR_PERIOD,
+        now_utc=now_utc,
     )
 
     ob = detect_order_block(df_m5, mss)

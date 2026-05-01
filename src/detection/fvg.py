@@ -65,6 +65,7 @@ def detect_fvgs_in_window(
     *,
     min_size_atr_mult: float,
     atr_period: int = 14,
+    now_utc: datetime | None = None,
 ) -> list[FVG]:
     """Detect every FVG of ``direction`` whose c2 falls inside the window.
 
@@ -73,6 +74,15 @@ def detect_fvgs_in_window(
     gap structurally appears (c1 has happened; c3 is the candle that
     confirms the gap by leaving it open). Any FVG whose c2 is in the
     window AND whose c3 is also present in ``df_m5`` is returned.
+
+    Real-time safety: when ``now_utc`` is provided, the **stricter**
+    rule applies — the entire 3-candle formation must have completed
+    by ``now_utc``, i.e. c3 must have closed (c3.time + M5 timeframe
+    <= now_utc). This is stricter than "c2 has formed" because c3 is
+    the candle whose close confirms the gap. Without this, an FVG
+    whose c3 has not yet closed at the production scheduler tick
+    leaks future data into the historical detection (see the look-ahead
+    audit at calibration/runs/FINAL_lookahead_audit_2026-05-01.md).
 
     Args:
         df_m5: M5 OHLC frame (UTC ``time``).
@@ -84,6 +94,10 @@ def detect_fvgs_in_window(
         min_size_atr_mult: ``FVG_MIN_SIZE_ATR_MULTIPLIER``. ``0`` disables
             the filter (returns every geometric FVG).
         atr_period: ``FVG_ATR_PERIOD`` (default 14).
+        now_utc: optional production scheduler tick. When set, an FVG
+            whose c3 has not closed by ``now_utc`` is dropped. ``None``
+            (default) is the legacy unconstrained mode used by tests
+            and the pre-fix backtest harness.
 
     Returns:
         ``list[FVG]`` sorted by ``c2_time_utc`` ascending (oldest first).
@@ -103,12 +117,25 @@ def detect_fvgs_in_window(
 
     atr_series = _atr(df_m5, atr_period).to_numpy(dtype="float64")
 
+    # Real-time bound: c3.close = c3.open + M5 timeframe must be <= now_utc.
+    # Infer the timeframe from the median candle spacing rather than
+    # hard-coding 5min, so this function remains usable on any timeframe
+    # consistent with its existing contract.
+    m5_timeframe: pd.Timedelta | None = None
+    if now_utc is not None and n >= 2:
+        diffs = pd.Series(times_py[1:]) - pd.Series(times_py[:-1])
+        m5_timeframe = pd.Timedelta(diffs.median())
+
     out: list[FVG] = []
     for j in range(1, n - 1):  # j is the c2 index
         c2_time = times_py[j]
         if c2_time < start_time_utc or c2_time > end_time_utc:
             continue
         c1, c3 = j - 1, j + 1
+        if now_utc is not None and m5_timeframe is not None:
+            # Stricter rule: c3 must have closed by now_utc.
+            if times_py[c3] + m5_timeframe > now_utc:
+                continue
         if direction == "bullish":
             if not (highs[c1] < lows[c3]):
                 continue
