@@ -44,8 +44,10 @@ DEAL_TYPE_SELL = 1
 
 # Watched portfolio (matches CLAUDE.md rule 9). NDX100 may be exposed
 # under broker-specific aliases (US100, USTEC, NAS100…) — we look at
-# every symbol that shows up in the history.
-WATCHED_SYMBOLS = ("XAUUSD", "NDX100", "US100", "USTEC", "NAS100")
+# every symbol that shows up in the history. SPX500 is included for
+# spec collection only (not in the validated portfolio) so the operator
+# can compare its execution conditions against NDX100.
+WATCHED_SYMBOLS = ("XAUUSD", "NDX100", "US100", "USTEC", "NAS100", "SPX500")
 
 OUTPUT_DIR = Path(__file__).resolve().parent
 RAW_HISTORY_PATH = OUTPUT_DIR / "raw_history.json"
