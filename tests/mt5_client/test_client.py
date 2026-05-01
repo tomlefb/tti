@@ -147,12 +147,15 @@ def test_fetch_ohlc_raises_on_empty_result():
 
 def test_fetch_ohlc_converts_timestamps_to_utc_using_broker_offset():
     """Broker returns POSIX seconds for 13:00 broker time at +3 → 10:00 UTC."""
-    # Broker offset detection: tick_time at +3h.
-    now_utc = datetime(2026, 7, 15, 10, 0, 0, tzinfo=UTC)
-    tick_seconds = now_utc.timestamp() + 3 * 3600
+    # Offset detection compares broker tick to datetime.now(UTC) inside
+    # client.connect(); pin tick_seconds relative to real now so the +3h
+    # offset is recovered regardless of when the test runs.
+    real_now_utc = datetime.now(tz=UTC).replace(microsecond=0)
+    tick_seconds = real_now_utc.timestamp() + 3 * 3600
 
-    # Rates: candle wallclock 13:00 broker-naive. Encoded as POSIX seconds
-    # whose decode-as-UTC reads 13:00 (the MT5 convention).
+    # Candle wallclock 13:00 broker-naive. broker_naive_seconds_to_utc
+    # reads only the wallclock components of the POSIX value so the
+    # reference date is arbitrary — keep a fixed date for the assertion.
     candle_wallclock_broker = datetime(2026, 7, 15, 13, 0, 0, tzinfo=UTC).timestamp()
     rates = _make_rates(candle_wallclock_broker, count=3, step_seconds=300)
 
@@ -173,8 +176,10 @@ def test_fetch_ohlc_converts_timestamps_to_utc_using_broker_offset():
 
 def test_fetch_ohlc_handles_volume_fallback_chain():
     """When 'tick_volume' is absent but 'real_volume' is present, use it."""
-    now_utc = datetime(2026, 7, 15, 10, 0, 0, tzinfo=UTC)
-    tick_seconds = now_utc.timestamp() + 2 * 3600  # +2h winter convention
+    # See test_fetch_ohlc_converts_timestamps_to_utc_using_broker_offset
+    # for why tick_seconds is pinned to real now.
+    real_now_utc = datetime.now(tz=UTC).replace(microsecond=0)
+    tick_seconds = real_now_utc.timestamp() + 2 * 3600  # +2h winter convention
 
     base = datetime(2026, 7, 15, 12, 0, 0, tzinfo=UTC).timestamp()
     rates = np.array(
