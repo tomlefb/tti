@@ -500,6 +500,7 @@ def _try_build_setup(
         displacement_multiplier=settings.MSS_DISPLACEMENT_MULTIPLIER,
         displacement_lookback=settings.MSS_DISPLACEMENT_LOOKBACK,
         max_lookforward_minutes=_MSS_LOOKFORWARD_MINUTES,
+        now_utc=now_utc,
     )
     if mss is None:
         return _reject(sweep, symbol, "no_mss_after_sweep")

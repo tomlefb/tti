@@ -68,6 +68,7 @@ def detect_mss(
     displacement_lookback: int,
     max_lookforward_minutes: int = 120,
     atr_period: int = 14,
+    now_utc: datetime | None = None,
 ) -> MSS | None:
     """Detect a Market Structure Shift on M5 after ``sweep``.
 
@@ -105,6 +106,16 @@ def detect_mss(
         max_lookforward_minutes: cap on the forward search window.
             Default 120 (= 24 M5 candles).
         atr_period: ATR period for the swing amplitude filter (14).
+        now_utc: optional production scheduler tick. When set, the MSS
+            iteration breaks as soon as the candidate candle's close
+            (``open + M5 timeframe``) exceeds ``now_utc`` — i.e. the
+            candle has not yet closed at the production scheduler tick
+            and is therefore not observable in real time. Without this
+            bound the function reads the full ``df_m5`` past ``now_utc``,
+            producing setups whose ``mss_confirm`` lies in the future
+            (the leak documented in
+            ``calibration/runs/FINAL_lookahead_audit_phase_b_blocked_2026-05-01.md``).
+            ``None`` (default) is the legacy unconstrained mode.
 
     Returns:
         ``MSS`` on first confirmation; ``None`` if no MSS within window.
@@ -124,6 +135,15 @@ def detect_mss(
     opens = df_m5["open"].to_numpy(dtype="float64")
     closes = df_m5["close"].to_numpy(dtype="float64")
 
+    # M5 timeframe — used by the now_utc bound on the MSS-candidate
+    # iteration to skip candles that have not yet closed at the
+    # production scheduler tick. Inferred from the median spacing so
+    # the function continues to work on any consistent frame.
+    m5_timeframe: timedelta | None = None
+    if now_utc is not None and n >= 2:
+        diffs = pd.Series(times_py[1:]) - pd.Series(times_py[:-1])
+        m5_timeframe = pd.Timedelta(diffs.median()).to_pytimedelta()
+
     # Significant M5 swings — needed to identify the level whose break
     # constitutes the structure shift. Deliberately called WITHOUT
     # ``now_utc``: the swing-confirmation leak that affects
@@ -134,7 +154,8 @@ def detect_mss(
     # MSS detector reads has been confirmed by candle ``i`` (the MSS
     # candidate itself), so any pivot data past ``i`` is naturally
     # ignored. Adding ``now_utc`` here would be a no-op and only obscure
-    # the contract.
+    # the contract — the now_utc bound on the MSS-candidate loop below
+    # already prevents the iteration from reaching candles past now_utc.
     sig_swings = find_swings(
         df_m5,
         lookback=swing_lookback_m5,
@@ -179,6 +200,16 @@ def detect_mss(
         if candle_time <= search_start:
             continue
         if candle_time > search_end:
+            break
+        if (
+            now_utc is not None
+            and m5_timeframe is not None
+            and candle_time + m5_timeframe > now_utc
+        ):
+            # Candidate candle has not yet closed at now_utc — its
+            # close (=open + timeframe) is in the future relative to
+            # the production scheduler tick. All later candles share
+            # this property, so break rather than continue.
             break
 
         # Find the most recent (highest-time) opposite pivot CONFIRMED
