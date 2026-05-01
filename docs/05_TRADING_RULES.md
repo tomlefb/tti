@@ -12,8 +12,10 @@ system stops sending notifications for the rest of the day (or session).
 - **Plan**: Stellar Lite 2-Step Challenge — Phase 1
 - **Account size**: $5,000
 - **Account type**: Swap
-- **Addon**: EA enabled (used only to allow Python scripts to read MT5,
-  NOT to auto-trade — see rule below)
+- **Addon**: EA enabled — Sprint 7+ uses it to AUTO-EXECUTE orders on the
+  demo account via `mt5.order_send`. The operator does NOT need to manually
+  click trades on demo any more (see Sprint 7 section below). Live-account
+  promotion requires a separate config change + review.
 
 ### Watched instruments (Sprint 6.6 portfolio)
 
@@ -40,11 +42,14 @@ context behind the drop).
 
 ## Per-trade risk
 
-- **Risk per trade**: 1% of account balance.
+- **Risk per trade**: 1% of account balance (`RISK_PER_TRADE_FRACTION = 0.01`).
   At $5K account → $50 per trade.
-- **Position sizing**: computed from SL distance and risk amount.
-  The system **displays** the recommended lot size in the notification,
-  but the human still types it manually into MT5.
+- **Position sizing** (Sprint 7+): computed by `order_manager.compute_volume`
+  from SL distance, risk budget, and `symbol.trade_contract_size`. The
+  result is floor-snapped to `volume_step` (never rounds up — risk budget
+  is a hard ceiling), then clamped to `[volume_min, volume_max]`. When the
+  raw calc lands below `volume_min`, the broker minimum wins and actual
+  risk slightly exceeds 1% — documented edge case for tiny SL distances.
 
 ---
 
@@ -62,13 +67,22 @@ the system **suppresses notifications** until the next reset.
    - The system sends a **critical Telegram alert** and stops permanently
      until the operator manually resets via a config flag.
 
-3. **Daily trade count**: 2 trades already taken today.
+3. **Daily trade count**: 2 trades already taken today
+   (`MAX_TRADES_PER_DAY = 2`).
    - Prevents over-trading and revenge trading after losses.
+   - Conservative rationale: at 1% risk × 2 SL = -2% maximum daily loss
+     from notifications-driven trades, leaves a 2% buffer vs the
+     FundedNext -4% daily loss limit. Even if both stops hit AND a
+     spread-induced slippage occurs, the buffer absorbs the noise.
 
 4. **Consecutive SL count**: 2 SL hit today across all pairs.
    - Forces a cool-off. Resets at next day's killzone.
 
-5. **Per-pair count**: 2 setups already taken on the same pair today.
+5. **Per-pair count**: 2 setups already taken on the same pair today
+   (`MAX_TRADES_PER_PAIR_PER_DAY = 2`).
+   - Edge case: prevents the same pair from re-firing twice in tight
+     succession when the M5 delivers two correlated setups within one
+     killzone.
 
 ---
 
@@ -85,17 +99,40 @@ Out of scope for v1.
 
 ---
 
+## What the system AUTO-EXECUTES (Sprint 7+ on demo)
+
+The system AUTO-EXECUTES orders on the demo account via
+`mt5.order_send`. The operator does NOT need to manually click trades
+on demo. Full position lifecycle is managed:
+
+1. **Limit-order placement** at `setup.entry_price` with SL =
+   `setup.stop_loss`, TP = `setup.tp_runner_price`, magic = 7766.
+   Volume from `compute_volume` (1% risk, contract-size-aware).
+2. **Pending → filled** detection via 30s polling.
+3. **TP1 partial close** (50% by default) when bid≥TP1 (long) or
+   ask≤TP1 (short); SL pulled to break-even on the remainder.
+4. **TP_runner / SL exit** observed when MT5 closes the position;
+   reconciled from history for blended-R reporting.
+5. **End-of-killzone cancel** for unfilled limits at 12:00 / 18:00 Paris.
+6. **Telegram notification at every transition** for operator
+   visibility.
+
 ## What the system NEVER does
 
-1. **Place orders.** No code path calls `mt5.order_send()`,
-   `mt5.order_modify()`, or `mt5.order_close()`. The operator is always
-   the one clicking the button in the MT5 terminal.
-2. **Move SL or TP.** Once the operator places the trade, the system has
-   no authority over it. If the operator wants to move SL to BE, they do
-   it manually.
+1. **Trade on a live account without explicit operator config.** The
+   move from demo to live requires a separate config change AND a
+   careful review pass. The default `AUTO_TRADING_ENABLED = True` on
+   the demo MT5 server is NOT a green light for live.
+2. **Move SL or TP outside the lifecycle.** The lifecycle moves SL to
+   break-even after TP1 — that is the only programmatic SL change. No
+   trailing stops, no early-exit heuristics, no "I think the move is
+   over" interventions.
 3. **Recommend deviating from the plan.** No "this looks like a good trade
    but doesn't meet criteria — take it anyway." Either the criteria are met
-   or no notification fires.
+   or no notification fires (and no order is placed).
+4. **Place orders when the kill switch is up.** A `KILL_SWITCH` file at
+   the project root short-circuits `place_order` immediately. Already-open
+   positions still close cleanly (the lifecycle keeps running).
 
 ---
 

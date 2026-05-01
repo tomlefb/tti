@@ -261,7 +261,7 @@ operator confidence high enough to consider real-money use.
 
 ---
 
-## Sprint 7 (optional) — LLM qualifier layer
+## Sprint 8 (optional) — LLM qualifier layer
 
 **Goal**: add an LLM as a post-detection setup qualifier (NOT detector).
 See `07_DETECTION_PHILOSOPHY.md` for what is and is not allowed.
@@ -277,6 +277,13 @@ Deliverables:
 **Done when**: ≥ 50 setups scored, statistical correlation between LLM
 score and outcome measured. If correlation is weak/null, ship the project
 without this layer and document the negative result.
+
+> Note: this layer was originally numbered Sprint 7. It was superseded
+> by the auto-execution Sprint 7 (below) when the operator decided that
+> closing the click-to-execute gap on the demo account was the higher-
+> priority deliverable. The LLM-qualifier work is preserved here as
+> future scope — pursue once Sprint 7 has accumulated ≥ 50 live demo
+> setups for outcome correlation.
 
 ---
 
@@ -351,18 +358,108 @@ post-live data collection — config preserved, not deleted.
 
 ---
 
+## Sprint 7 — Auto-execution on demo account [COMPLETE]
+
+**Goal**: enable auto-execution on the FundedNext demo so no setup is
+missed due to operator availability constraints during work hours.
+The detection pipeline is unchanged; the new `src/execution/` module
+places, manages, and closes orders via `mt5.order_send` with the full
+safety stack.
+
+Deliverables:
+
+- [x] `src/execution/` module:
+      - `safe_guards.py` (kill switch + auto_trading_disabled flag,
+        delegates to `hard_stops.is_blocked` for financial gates).
+      - `order_manager.py` (`OrderResult`, `compute_volume`,
+        `place_order`, `cancel_order`, `modify_position_sl`).
+      - `position_lifecycle.py` (`check_open_positions` polls every 30s
+        and walks pending → filled → tp1_hit → (tp_runner_hit | sl_hit);
+        `end_of_killzone_cleanup` cancels unfilled limits at killzone
+        close).
+      - `recovery.py` (`reconcile_orphan_positions` runs once on startup;
+        orphan close + lost-order detection).
+- [x] `src/mt5_client/client.py` extended with the order-operations
+      surface: `get_symbol_info`, `place_limit_order`,
+      `cancel_pending_order`, `modify_position_sl`, `get_open_positions`,
+      `get_pending_orders`, `close_partial_position`,
+      `close_position_at_market`, `get_position_close_info`. New typed
+      snapshots: `SymbolInfoSnapshot`, `PositionSnapshot`,
+      `PendingOrderSnapshot`, `OrderSendResult`.
+- [x] SQLite schema extended:
+      - new `orders` table (one row per limit order placed; `mt5_ticket`
+        UNIQUE; status walks
+        `pending → filled → tp1_hit → (tp_runner_hit | sl_hit | cancelled | lost)`).
+      - new `spread_anomalies` table (post-mortem only — system never
+        blocks on wide spreads).
+      - `daily_state` extended with `auto_trading_disabled` (Boolean
+        default False) and `disabled_reason` (String nullable). Existing
+        bias_*/trades_taken_count/consecutive_sl_count/daily_loss_usd/
+        daily_stop_triggered columns untouched.
+- [x] `config/settings.py.example` extended with `AUTO_TRADING_ENABLED`,
+      `MAGIC_NUMBER`, `AUTO_TRADING_DRY_RUN`, `TP1_PARTIAL_FRACTION`,
+      `MAX_RISK_PER_TRADE_USD`, `SPREAD_ANOMALY_MULTIPLIER`,
+      `LIFECYCLE_CHECK_INTERVAL_SEC`, `KILL_SWITCH_PATH`, plus
+      `typical_spread` keys under `INSTRUMENT_CONFIG[XAUUSD/NDX100]`.
+- [x] `src/scheduler/jobs.py`: `run_detection_cycle` accepts an optional
+      `place_order_callback`. When `AUTO_TRADING_ENABLED` and a callback
+      is wired, A/A+ setups are auto-executed after Telegram notify.
+      Failures are caught inside the cycle so order-side errors never
+      crash detection.
+- [x] `src/scheduler/runner.py`: startup calls
+      `reconcile_orphan_positions`; new APScheduler jobs registered when
+      auto-trading is enabled (`position_lifecycle` IntervalTrigger
+      every 30s; `london_killzone_end_cleanup` /
+      `ny_killzone_end_cleanup` CronTriggers at killzone close).
+- [x] `src/notification/telegram_bot.py` + `message_formatter.py`:
+      eight new sync hooks + formatters (order_placed, order_filled,
+      tp1_hit, tp_runner_hit, sl_hit, order_cancelled, setup_skipped,
+      orphan_alert).
+- [x] Tests: 90+ new unit tests across schema, repository, safe_guards,
+      order_manager, position_lifecycle, recovery, and lifecycle message
+      formatters. Test suite grew from 232 → 330+.
+- [x] Documentation updated: CLAUDE.md (rules 1, 11), `04_PROJECT_RULES`
+      (architectural rule 3, new "Auto-execution rules" section, config
+      reference for the new keys), `05_TRADING_RULES` (NEVER section,
+      MAX_TRADES_PER_DAY rationale, position-sizing precision), `02_ARCHITECTURE`
+      (data flow + new src/execution/ component description),
+      `03_ROADMAP` (this section + Sprint 7 → Sprint 8 renumbering).
+- [x] Smoke test on Mac: `scripts/test_auto_execution_dry_run.py`
+      validates the full pipeline end-to-end without sending real orders.
+
+**Done when**: synthetic test setup runs through place_order → journal
+write → Telegram fire end-to-end on demo account. Operator merges
+`sprint-7` to `main`, pulls on the Windows host, runs the scheduler.
+
+Key safety guarantees:
+
+- Kill switch (`KILL_SWITCH` file) hard-disables order placement.
+- Daily-loss circuit breaker fires at 80% of `DAILY_LOSS_LIMIT`
+  (delegated to `hard_stops`).
+- `MAX_TRADES_PER_DAY = 2` (1% × 2 SL = -2% worst case, leaves -2%
+  buffer vs FundedNext -4% daily loss limit).
+- Lifecycle parity with backtest: TP1 partial → BE → TP runner / SL.
+- Recovery on startup catches orphans before they drift.
+
+---
+
 ## Current state
 
-- **Active sprint**: 6.6 → ready for Sprint 7. Live portfolio is
-  XAUUSD + NDX100 only, A-grade-only notifications. ETHUSD config
-  preserved (commented out) in `config/settings.py.example` for future
-  re-add after dedicated crypto-microstructure calibration of the
-  A-grade filter.
-- **Last updated**: Sprint 6.6 complete 2026-05-01. ETHUSD removed from
-  live portfolio after Sprint 6.5's `final_portfolio_validation` run
-  surfaced an A-grade filter inversion on ETH (-0.42 mean R / 26 A-grade
-  setups vs +0.27 all-qualities). Trimmed portfolio re-validated; field
-  test resumes on XAU+NDX.
+- **Active sprint**: 7 (Auto-execution on demo) — implementation
+  complete on the `sprint-7` branch, pending operator review and
+  merge to `main`. Live portfolio is XAUUSD + NDX100, A-grade-only
+  notifications, auto-execution on demo via `mt5.order_send` with
+  the full safety stack (kill switch, daily-loss circuit breaker,
+  recovery on startup).
+- **Last updated**: Sprint 7 complete 2026-05-01. 9 commits on
+  `sprint-7` branch; tests grew 232 → 330+; smoke test passes on
+  Mac (dry-run). Next step: operator merges + pulls on Windows host
+  + runs the scheduler against the FundedNext demo account.
+- **Sprint 7 supersedes the original LLM qualifier plan** (now
+  Sprint 8). The operator decided that closing the click-to-execute
+  gap on the demo account was higher priority. LLM-qualifier work
+  is preserved as future scope — pursue once Sprint 7 has accumulated
+  ≥ 50 live demo setups for outcome correlation.
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.
@@ -371,14 +468,8 @@ findings from the previous sprint, and any roadmap revisions.
 
 ## Backlog (non-blocking)
 
-- **mt5_client time-conversion test drift**:
-  `tests/mt5_client/test_client.py::test_fetch_ohlc_converts_timestamps_to_utc_using_broker_offset`
-  and `test_fetch_ohlc_handles_volume_fallback_chain` fail when run on dates
-  significantly past the hardcoded fixture base, with
-  `ValueError: offset must be a timedelta strictly between -24h and +24h`.
-  Pre-existing — the offset computation in the test scaffolding accumulates
-  the difference between today's date and the fixture's anchor as an
-  hours offset rather than treating it as a date delta. Not user-facing;
-  the production `time_conversion.py` is correct under realistic broker
-  offsets. Fix in a small follow-up: rewrite the fixture to anchor
-  relative to "now" or use a `freezegun`-style time pin.
+- ~~**mt5_client time-conversion test drift**~~ — fixed 2026-05-01
+  on the Sprint 7 prep branch. Both failing tests now decouple
+  `tick_seconds` (relative to real-now) from `candle_wallclock_broker`
+  (arbitrary fixed date). See commit
+  `fix: time_conversion date drift bug (mt5_client tests)`.

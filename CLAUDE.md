@@ -7,24 +7,33 @@
 
 ## What this project is
 
-An automated SMC/ICT trade setup **detector** based on TJR Trades' methodology.
+An automated SMC/ICT trade setup **detector + executor** based on TJR Trades'
+methodology.
 
-It scans 4 instruments (XAUUSD, NDX100, EURUSD, GBPUSD) on the M5 timeframe
-during London and NY killzones, detects valid setups using deterministic Python
-logic, and sends Telegram notifications with annotated chart screenshots when
-a setup is found. The human operator **manually validates and executes** each
-trade — the system does NOT auto-trade.
+It scans the validated portfolio (XAUUSD + NDX100, see rule 9) on the M5
+timeframe during London and NY killzones, detects valid setups using
+deterministic Python logic, and **auto-executes** the A/A+ setups on a
+FundedNext demo account (Sprint 7+). Telegram notifications fire in parallel
+at every lifecycle event so the operator retains full visibility.
 
-The goal is to remove the operator from continuous chart monitoring (which
-causes FOMO, premature entries, and emotional exits) by acting as a strict
-mechanical filter.
+The goal is to remove the operator from continuous chart monitoring AND from
+the click-to-execute step that suffers under work-hour constraints, while
+keeping every safety net (daily loss circuit breaker, kill switch, hard
+stops, journal of every event) under operator control.
 
 ---
 
 ## Critical rules — read before any task
 
-1. **NEVER implement auto-trading.** Detection + Telegram notification only.
-   The human always decides. No order placement code, ever.
+1. **Auto-execution is enabled on the demo account (Sprint 7+).** Order
+   placement code lives in `src/execution/`. The `AUTO_TRADING_ENABLED`
+   flag in `config/settings.py` controls activation; the `KILL_SWITCH`
+   file at the project root, when present, hard-disables order placement
+   immediately. The operator can move to a live account later by
+   updating settings + a careful review. Telegram notifications run in
+   parallel for visibility and post-trade review. The detection
+   pipeline is unchanged — `src/execution/` only consumes `Setup`
+   objects from it.
 2. **Detection is rule-based; LLMs are only for the judgment layer.**
    See `docs/07_DETECTION_PHILOSOPHY.md` for the precise taxonomy. The short
    version: pure logic and calibrated rules in Python; LLMs only as a
@@ -56,6 +65,13 @@ mechanical filter.
     is the live-deployment default — B-grade detections are still produced
     by the orchestrator and journaled (`was_notified=False`) so the
     operator can audit false negatives, but they do not push to Telegram.
+    Auto-execution honours the same gate (B-grade detections never reach
+    `place_order`).
+11. **Lifecycle parity with backtest.** Position lifecycle (TP1 partial →
+    BE → TP runner / SL) must mirror the backtest behaviour exactly. Any
+    change to the execution logic must be reflected in the backtest engine
+    (`calibration/`) so live results stay comparable to backtest
+    expectations. Diverging the two is a stop-the-line event.
 
 For the full rule set, see `docs/04_PROJECT_RULES.md`.
 
@@ -100,9 +116,12 @@ says *what* to detect; the second says *how to think about detecting it*.
 
 ## Current state
 
-- **Sprint**: 0 (Setup & scaffolding)
-- **Status**: Project skeleton in place. No detection logic implemented yet.
-- **Next milestone**: MT5 connectivity proven, Telegram bot proven, Git workflow Mac↔Windows working.
+- **Sprint**: 7 (Auto-execution on demo) — complete pending operator review.
+- **Status**: Detection + auto-execution + lifecycle + recovery + Telegram
+  notifications wired and tested. Smoke-test passes on Mac (dry-run); MT5
+  go-live pending operator review of the `sprint-7` branch.
+- **Next milestone**: Operator merges `sprint-7` to `main`, pulls on the
+  Windows host, runs the scheduler against the FundedNext demo account.
 
 When a sprint completes, update `docs/03_ROADMAP.md` (mark items done, note
 deviations, update "Current state" above).
@@ -113,7 +132,10 @@ deviations, update "Current state" above).
 
 - Detection pipeline runs on Windows host where MT5 terminal is open and connected.
 - Detection cycle triggered by `APScheduler` every 5 minutes during killzones.
-- Each cycle: fetch OHLC → compute bias → mark liquidity → scan for sweep+MSS+POI → if valid, notify.
+- Each cycle: fetch OHLC → compute bias → mark liquidity → scan for sweep+MSS+POI → if valid, notify + (Sprint 7+) auto-execute on A/A+.
+- Position lifecycle polled every 30s (Sprint 7+): pending → filled → tp1_hit (50% close + SL→BE) → tp_runner_hit / sl_hit. Mirrors backtest behaviour exactly.
+- End-of-killzone cleanup (Sprint 7+): pending limit orders cancelled at 12:00 Paris (London) and 18:00 Paris (NY).
+- Recovery on startup (Sprint 7+): orphan positions closed at market with critical Telegram alert; lost orders marked.
 - Telegram bot inline buttons (`Taken` / `Skipped`) write to SQLite journal.
 - Trade outcomes are tracked post-hoc by querying MT5 trade history (no live PnL feed needed).
 

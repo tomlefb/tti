@@ -15,9 +15,15 @@ here, then to the strategy doc, then to the detection philosophy doc.
 2. **Calibrated detectors require empirical calibration**, not arbitrary
    defaults. Any sprint shipping a calibrated detector is not "done"
    without a calibration session report.
-3. **No auto-trading code.** This codebase will never contain `mt5.order_send()`
-   or equivalent. If a feature request implies it, push back and refer to
-   `CLAUDE.md` rule #1.
+3. **Auto-execution is enabled on the demo account (Sprint 7+).** The
+   `src/execution/` module places orders via `mt5.order_send()` with
+   strict safe-guards: kill switch file, daily-loss circuit breaker
+   (delegated to `src/scheduler/hard_stops.py`), account verification
+   at startup. The flag `AUTO_TRADING_ENABLED` defaults to True on the
+   demo; setting it to False reverts the system to Sprint 6
+   notifications-only behaviour. Order placement does NOT bypass
+   `hard_stops.is_blocked` — `safe_guards.check_pre_trade` delegates
+   to it for all financial gates.
 4. **Single source of truth for config.** All thresholds, buffers, session
    times, watched pairs live in `config/settings.py`. No magic numbers in
    detection code.
@@ -119,8 +125,14 @@ here, then to the strategy doc, then to the detection philosophy doc.
 - Modify `docs/01_STRATEGY_TJR.md` or `docs/07_DETECTION_PHILOSOPHY.md`.
   (Strategy and methodology changes go through human review.)
 - Touch `config/secrets.py` or `.env`.
-- Implement order placement, position modification, or any code that calls
-  `mt5.order_*` functions. **This is a hard prohibition.**
+- Modify the `src/execution/` module without explicit approval. This
+  module places real orders on the broker — every change must be
+  reviewed and tested under TDD before being committed. Behaviour
+  changes here MUST be mirrored in the backtest engine to preserve
+  parity (rule #11 in CLAUDE.md). For Sprint 6 and earlier the
+  `mt5.order_*` calls were a hard prohibition; from Sprint 7 onward
+  they are restricted to `src/execution/` and must respect the
+  safe-guards layer.
 - "Improve" the architecture by reorganizing modules without an explicit
   request to do so.
 - Replace a calibrated rule with an LLM call "to make it better". The
@@ -228,6 +240,7 @@ If a key is renamed, update this table first, then code, then docs.
 | `sweep_buffer` | `float` | price units | Min wick excursion beyond a level to count as a sweep. |
 | `equal_hl_tolerance` | `float` | price units | Max distance between two levels to consider them "equal". |
 | `sl_buffer` | `float` | price units | Extra distance beyond sweep extreme for stop loss. |
+| `typical_spread` | `float` (Sprint 7) | price units | Baseline spread for anomaly detection. When live spread > `typical_spread × SPREAD_ANOMALY_MULTIPLIER`, a row is logged to `spread_anomalies`; the trade is NOT blocked. Optional — instruments without this key skip the check. |
 
 Units are USD for `XAUUSD`, points for indices (`NDX100`), decimal price
 for FX (`EURUSD`, `GBPUSD`).
@@ -271,6 +284,19 @@ for FX (`EURUSD`, `GBPUSD`).
 |---|---|---|
 | `MAX_LOSS_OVERRIDE` | `bool` | When `True`, the `max_loss_critical` hard stop is suppressed. Set ONLY after manually reviewing the breach (see docs/05). |
 
+### Auto-execution (Sprint 7)
+
+| Key | Type | Meaning |
+|---|---|---|
+| `AUTO_TRADING_ENABLED` | `bool` | Master switch. When `False`, the system reverts to Sprint 6 notifications-only behaviour (lifecycle / cleanup / recovery jobs are not registered). |
+| `MAGIC_NUMBER` | `int` | Identifier (default `7766`) attached to every order placed by the system. Recovery / lifecycle filter on this. |
+| `AUTO_TRADING_DRY_RUN` | `bool` | When `True`, `place_order` logs what it WOULD send without calling `mt5.order_send`. Used by the smoke test on the Mac dev box. |
+| `TP1_PARTIAL_FRACTION` | `float` | Fraction of position closed at TP1 (default `0.5`). Remainder rides to TP_runner with SL pulled to break-even. |
+| `MAX_RISK_PER_TRADE_USD` | `float\|None` | Optional hard ceiling on per-trade risk in USD; `None` = no cap, `RISK_PER_TRADE_FRACTION × balance` is the only constraint. |
+| `SPREAD_ANOMALY_MULTIPLIER` | `float` | When live spread exceeds `typical × multiplier` (default 3×), a row is journaled to `spread_anomalies`. Does NOT block the trade. |
+| `LIFECYCLE_CHECK_INTERVAL_SEC` | `int` | Position-lifecycle polling cadence (default 30). Cheap read-only check at all hours. |
+| `KILL_SWITCH_PATH` | `str` (path) | Path to the kill-switch file (default `KILL_SWITCH` at project root). Presence hard-disables `place_order`. |
+
 ### Logging
 
 | Key | Type | Meaning |
@@ -305,6 +331,67 @@ for FX (`EURUSD`, `GBPUSD`).
 | `MT5_LOGIN` | `int` | MT5 account number. |
 | `MT5_PASSWORD` | `str` | MT5 password. |
 | `MT5_SERVER` | `str` | MT5 server name (exact, from broker). |
+
+---
+
+## Auto-execution rules (Sprint 7+)
+
+- **Magic number 7766** identifies every order placed by the system.
+  Recovery / lifecycle filter on this magic to keep operator-side
+  manual orders untouched.
+
+- **Position size**: `volume = (account.balance × RISK_PER_TRADE_FRACTION) /
+  (sl_distance_in_price × symbol.trade_contract_size)`, floor-snapped to
+  `volume_step` (never round up — risk budget is a hard ceiling), then
+  clamped to `[volume_min, volume_max]`. When the calc yields below
+  `volume_min`, the broker minimum wins and actual risk slightly exceeds
+  `RISK_PER_TRADE_FRACTION` — documented edge case.
+
+- **TP1 partial close**: `TP1_PARTIAL_FRACTION` (default 0.5) of position
+  closes when bid≥TP1 (long) or ask≤TP1 (short); SL moves to break-even
+  on the remainder. The lifecycle is idempotent — once
+  `position.volume < order.volume`, no further partial fires.
+
+- **Limit-order cancel**: pending limit orders auto-cancel at end of
+  their killzone (12:00 Paris London, 18:00 Paris NY) via
+  `position_lifecycle.end_of_killzone_cleanup`. Filled positions
+  carry across killzones unaffected.
+
+- **Spread anomaly**: when live spread exceeds
+  `INSTRUMENT_CONFIG[symbol]['typical_spread'] × SPREAD_ANOMALY_MULTIPLIER`
+  (default 3×), a row is written to the `spread_anomalies` table for
+  post-mortem review. The trade IS NOT BLOCKED — operator design call.
+
+- **Kill switch**: when the file `KILL_SWITCH` exists at the project
+  root (or `settings.KILL_SWITCH_PATH`), `safe_guards.kill_switch_active()`
+  returns True and `place_order` short-circuits with reason
+  `kill_switch`. Lifecycle and end-of-killzone cleanup keep running so
+  already-open positions still close cleanly. Operator drops the file
+  with a free-form note for the post-mortem trail.
+
+- **Daily-loss circuit breaker**: at 80% of `DAILY_LOSS_LIMIT` (default
+  $160 on the FundedNext $5K Phase 1), `hard_stops.is_blocked` returns
+  `daily_loss_reached` and `place_order` skips. The notifier still fires
+  the setup notification so the operator can decide manually.
+
+- **Two-layer safety stack**:
+  - `src/scheduler/hard_stops.py` (Sprint 6) gates Telegram notifications.
+  - `src/execution/safe_guards.py` (Sprint 7) gates auto-execution
+    only — adds kill switch + `auto_trading_disabled` flag on top of
+    `hard_stops.is_blocked` (which it delegates to). The operator wants
+    to be alerted to setups even when auto-execution is paused.
+
+- **Recovery on startup** (`src/execution/recovery.py`): orphan
+  positions (MT5 has it, journal does not) are closed at market with a
+  CRITICAL Telegram alert. Lost orders (journal has it, MT5 does not)
+  are marked `lost` so a stale "open" row does not block fresh setups
+  via the per-pair count gate.
+
+- **Lifecycle events emit Telegram + SQLite in parallel.** Every state
+  change (placed / filled / tp1_hit / tp_runner_hit / sl_hit /
+  cancelled / orphan_alert) writes to the journal AND fires a
+  formatted Telegram message. A Telegram failure logs but never crashes
+  the scheduler.
 
 ---
 

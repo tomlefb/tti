@@ -32,7 +32,18 @@
        │     │
        │     └── inline buttons: [Taken] [Skipped]
        │
-       ├── SQLite journal ── all detected setups, decisions, outcomes
+       ├── (Sprint 7+) Auto-execution layer (src/execution/)
+       │     1. safe_guards.check_pre_trade  — kill switch + auto-disabled
+       │        + delegates to hard_stops for daily-loss / SL / count gates
+       │     2. order_manager.place_order    — position sizing, mt5.order_send,
+       │        spread anomaly logging, journal persistence
+       │     3. position_lifecycle.check_open_positions — every 30s:
+       │        pending → filled, TP1 partial close + SL → BE, TP_runner / SL exit
+       │     4. position_lifecycle.end_of_killzone_cleanup — 12:00 / 18:00 Paris
+       │     5. recovery.reconcile_orphan_positions — runs once at startup
+       │
+       ├── SQLite journal ── setups, decisions, outcomes,
+       │                     orders, spread_anomalies (Sprint 7+)
        │
        └── Outcome tracker ── periodically queries MT5 trade history
                               to attach actual trade results to journal entries
@@ -142,7 +153,48 @@ Cron schedule:
 - Once at 08:55 Paris and 15:25 Paris: pre-killzone bias computation
 - Daily at 23:00 Paris: outcome tracker reconciliation
 
-### 6. `src/qualifier/` (Sprint 7+, optional)
+### 6. `src/execution/` (Sprint 7+)
+
+```
+execution/
+├── safe_guards.py        # kill switch + auto_trading_disabled + hard_stops delegation
+├── order_manager.py      # OrderResult, compute_volume, place_order, cancel_order, modify_position_sl
+├── position_lifecycle.py # check_open_positions, end_of_killzone_cleanup, _reconcile_closed_position
+└── recovery.py           # reconcile_orphan_positions (orphan close + lost-order detection)
+```
+
+Auto-execution module. Owns every `mt5.order_*` call in the codebase.
+
+- `safe_guards.check_pre_trade(setup, ...)` runs:
+  1. Kill switch (file-based, hard-disable).
+  2. `daily_state.auto_trading_disabled` flag (set by the layer itself
+     when a critical fault is observed mid-cycle).
+  3. Delegates to `src/scheduler/hard_stops.is_blocked(...)` for the
+     financial gates (account info, daily loss, max loss, news,
+     daily count, consecutive SL, per-pair count).
+  No financial-gate logic is duplicated.
+
+- `order_manager.place_order(...)` is the place-order pipeline:
+  pre-flight → account+symbol info → position-size calc → spread
+  anomaly logging → MT5 `order_send` → retcode check → persist
+  to `orders` → Telegram pre+post notification. Returns
+  `OrderResult(success, ticket, error_code, error_message)`.
+
+- `position_lifecycle.check_open_positions(...)` runs every
+  `LIFECYCLE_CHECK_INTERVAL_SEC` (default 30s) and walks status
+  transitions: `pending → filled → tp1_hit → (tp_runner_hit | sl_hit)`.
+  TP1 detection: `bid ≥ TP1` (long) | `ask ≤ TP1` (short).
+  Idempotent — once `position.volume < order.volume`, no further
+  partial fires. Realised R uses `profit_usd / initial_risk_usd` when
+  available (handles BLENDED TP1-partial + runner outcomes correctly).
+
+- `recovery.reconcile_orphan_positions(...)` runs once at scheduler
+  startup. Orphan positions (MT5 has it, journal does not — or knows
+  about it with a terminal status) are closed at market with a
+  CRITICAL Telegram alert. Lost orders (journal has it, MT5 does
+  not) are marked `lost`.
+
+### 7. `src/qualifier/` (Sprint 7+, optional)
 
 ```
 qualifier/
@@ -154,7 +206,7 @@ Receives structured fields (never raw OHLC or images). Returns a JSON
 score. See `07_DETECTION_PHILOSOPHY.md` for what the LLM is and is not
 allowed to do.
 
-### 7. `config/`
+### 8. `config/`
 
 ```
 config/
@@ -166,7 +218,7 @@ config/
 `settings.py` is the single place to tune thresholds. No magic numbers
 elsewhere in the code.
 
-### 8. `calibration/`
+### 9. `calibration/`
 
 ```
 calibration/
@@ -204,4 +256,6 @@ A single Python process runs continuously on the Windows host. It must:
 - A web UI. Telegram is the only interface.
 - A REST API. The system is a single-process internal tool.
 - Cloud deployment. Runs on the operator's home Windows machine.
-- Order execution. The human places trades manually in MT5.
+- Live-account auto-execution by default. Sprint 7 enables auto-execution
+  on the **demo** account; promoting to live requires a separate config
+  change AND a careful review pass.
