@@ -109,3 +109,120 @@ def format_setup_message(setup: Setup) -> str:
     )
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 7 — auto-execution lifecycle templates
+# ---------------------------------------------------------------------------
+
+
+def format_order_placed_message(
+    *, setup: Setup, ticket: int, volume: float, risk_usd: float
+) -> str:
+    """Sent right after a successful ``mt5.order_send``."""
+    fmt = lambda p: _format_price(setup.symbol, p)  # noqa: E731
+    return (
+        f"✅ <b>ORDER PLACED</b> — Ticket #{ticket}\n"
+        f"{setup.symbol} {setup.direction.upper()} {setup.quality}\n"
+        f"Volume: {volume:.2f} lots (~${risk_usd:.2f} risk)\n"
+        f"Limit @ {fmt(setup.entry_price)}\n"
+        f"SL: {fmt(setup.stop_loss)}  TP: {fmt(setup.tp_runner_price)}"
+    )
+
+
+def format_order_filled_message(
+    *, symbol: str, direction: str, ticket: int, entry_price: float
+) -> str:
+    """Sent when the lifecycle detects ``pending → filled``.
+
+    Lifecycle-context formatter — takes scalars rather than a Setup so
+    the position_lifecycle module (which only sees an OrderRow) can call
+    it without a journal lookup."""
+    fmt = lambda p: _format_price(symbol, p)  # noqa: E731
+    return (
+        f"📥 <b>Filled</b> — Ticket #{ticket}\n"
+        f"{symbol} {direction.upper()} @ {fmt(entry_price)}"
+    )
+
+
+def format_tp1_hit_message(
+    *,
+    symbol: str,
+    ticket: int,
+    partial_volume: float,
+    tp1_price: float,
+    entry_price: float,
+) -> str:
+    """Sent when TP1 is crossed and the lifecycle realises the partial."""
+    fmt = lambda p: _format_price(symbol, p)  # noqa: E731
+    return (
+        f"🎯 <b>TP1 HIT</b> — Ticket #{ticket}\n"
+        f"Closed {partial_volume:.4f} lots @ {fmt(tp1_price)}\n"
+        f"SL moved to BE ({fmt(entry_price)}) on remaining."
+    )
+
+
+def format_tp_runner_hit_message(
+    *,
+    symbol: str,
+    ticket: int,
+    exit_price: float,
+    realized_r: float,
+) -> str:
+    """Sent when MT5 closes the runner half at TP_runner."""
+    fmt = lambda p: _format_price(symbol, p)  # noqa: E731
+    return (
+        f"🚀 <b>TP RUNNER HIT</b> — Ticket #{ticket}\n"
+        f"Closed @ {fmt(exit_price)}\n"
+        f"Total realized: {realized_r:+.2f}R"
+    )
+
+
+def format_sl_hit_message(
+    *,
+    symbol: str,
+    ticket: int,
+    exit_price: float,
+    realized_r: float,
+) -> str:
+    """Sent when MT5 closes the position at SL (or post-TP1 BE-stop)."""
+    fmt = lambda p: _format_price(symbol, p)  # noqa: E731
+    return (
+        f"❌ <b>STOP LOSS</b> — Ticket #{ticket}\n"
+        f"Closed @ {fmt(exit_price)}\n"
+        f"Total realized: {realized_r:+.2f}R"
+    )
+
+
+def format_order_cancelled_message(
+    *, ticket: int, reason: str
+) -> str:
+    """Sent when end_of_killzone_cleanup or manual cancel fires."""
+    return (
+        f"⏱️ <b>ORDER CANCELLED</b> — Ticket #{ticket}\n"
+        f"Reason: end of {reason} killzone — limit not hit."
+    )
+
+
+def format_setup_skipped_message(*, setup: Setup, reason: str) -> str:
+    """Sent when ``check_pre_trade`` blocks an A/A+ setup from auto-execution.
+
+    The Telegram setup notification still fires (via
+    :func:`format_setup_message`) so the operator can decide manually."""
+    return (
+        f"⚠️ <b>SETUP SKIPPED</b> — {setup.symbol} {setup.quality}\n"
+        f"Reason: <code>{reason}</code>\n"
+        f"(Notification only — auto-execution disabled for this trade.)"
+    )
+
+
+def format_orphan_alert_message(
+    *, ticket: int, symbol: str, volume: float
+) -> str:
+    """CRITICAL alert when recovery finds an orphan position at startup."""
+    return (
+        f"🚨 <b>CRITICAL: Orphan position closed</b>\n"
+        f"Symbol: {symbol}, Ticket: {ticket}, Volume: {volume:.2f}\n"
+        f"This position was open with our magic number but not in the journal. "
+        f"Closed at market for safety. Investigate before restart."
+    )

@@ -22,12 +22,23 @@ import logging
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 from src.detection.setup import Setup
-from src.notification.message_formatter import format_setup_message
+from src.notification.message_formatter import (
+    format_order_cancelled_message,
+    format_order_filled_message,
+    format_order_placed_message,
+    format_orphan_alert_message,
+    format_setup_message,
+    format_setup_skipped_message,
+    format_sl_hit_message,
+    format_tp1_hit_message,
+    format_tp_runner_hit_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -177,6 +188,108 @@ class TelegramNotifier:
     async def send_error(self, text: str) -> bool:
         """Send an error/critical alert. Thin wrapper around ``send_text``."""
         return await self.send_text(text)
+
+    # -----------------------------------------------------------------
+    # Sprint 7 — auto-execution lifecycle hooks
+    # -----------------------------------------------------------------
+    # These are SYNC entry points so the order_manager / position_lifecycle
+    # / recovery modules can call them without awaiting (they run in
+    # cron-driven jobs that may not own an event loop). Internally they
+    # schedule the underlying ``send_text`` coroutine via
+    # :func:`_schedule_send` so the asyncio loop owned by the polling
+    # bot eventually flushes the message.
+
+    def send_order_placed(
+        self, setup: Setup, *, ticket: int, volume: float, risk_usd: float
+    ) -> None:
+        text = format_order_placed_message(
+            setup=setup, ticket=ticket, volume=volume, risk_usd=risk_usd
+        )
+        self._schedule_send(text)
+
+    def send_order_filled(self, *, order: Any, ticket: int) -> None:
+        text = format_order_filled_message(
+            symbol=str(order.symbol),
+            direction=str(order.direction),
+            ticket=int(ticket),
+            entry_price=float(order.entry_price),
+        )
+        self._schedule_send(text)
+
+    def send_tp1_hit(
+        self, *, order: Any, ticket: int, partial_volume: float
+    ) -> None:
+        text = format_tp1_hit_message(
+            symbol=str(order.symbol),
+            ticket=int(ticket),
+            partial_volume=float(partial_volume),
+            tp1_price=float(order.tp1),
+            entry_price=float(order.entry_price),
+        )
+        self._schedule_send(text)
+
+    def send_tp_runner_hit(
+        self,
+        *,
+        order: Any,
+        ticket: int,
+        exit_price: float,
+        realized_r: float,
+    ) -> None:
+        text = format_tp_runner_hit_message(
+            symbol=str(order.symbol),
+            ticket=int(ticket),
+            exit_price=float(exit_price),
+            realized_r=float(realized_r),
+        )
+        self._schedule_send(text)
+
+    def send_sl_hit(
+        self,
+        *,
+        order: Any,
+        ticket: int,
+        exit_price: float,
+        realized_r: float,
+    ) -> None:
+        text = format_sl_hit_message(
+            symbol=str(order.symbol),
+            ticket=int(ticket),
+            exit_price=float(exit_price),
+            realized_r=float(realized_r),
+        )
+        self._schedule_send(text)
+
+    def send_order_cancelled(self, *, ticket: int, reason: str) -> None:
+        text = format_order_cancelled_message(ticket=int(ticket), reason=reason)
+        self._schedule_send(text)
+
+    def send_setup_skipped(self, setup: Setup, reason: str) -> None:
+        text = format_setup_skipped_message(setup=setup, reason=reason)
+        self._schedule_send(text)
+
+    def send_orphan_alert(
+        self, *, ticket: int, symbol: str, volume: float
+    ) -> None:
+        text = format_orphan_alert_message(
+            ticket=int(ticket), symbol=str(symbol), volume=float(volume)
+        )
+        self._schedule_send(text)
+
+    def _schedule_send(self, text: str) -> None:
+        """Schedule a ``send_text`` coroutine on the running loop, or run
+        it inline when no loop is active (synchronous test contexts)."""
+        try:
+            asyncio.get_running_loop()
+            asyncio.ensure_future(
+                self.send_text(text, parse_mode="HTML")
+            )
+        except RuntimeError:
+            # No running loop — drive inline (used by unit tests + dry-run).
+            try:
+                asyncio.run(self.send_text(text, parse_mode="HTML"))
+            except Exception:  # noqa: BLE001
+                logger.exception("schedule_send fallback failed")
 
     async def start_polling(self) -> None:
         """Start the bot's update polling loop. Blocks until ``stop()``."""
