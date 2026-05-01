@@ -11,22 +11,29 @@ would silently invalidate every backtest.
 
 Method
 ------
-1. Run the detector across a sample of trading dates (10y of XAUUSD and
-   NDX100 Databento fixtures) with a 60-day lookback window — exactly
-   the same windowing the existing extended-10y backtest uses.
-2. Randomly sample N setups from the result.
-3. For each setup at MSS confirm time T:
-     - Slice the four OHLC frames to keep rows whose ``time <= T + 5min``
-       (one M5 candle past MSS confirm — the soonest the production
-       scheduler at a 5-min cadence could observe the new MSS candle).
-     - Re-run ``build_setup_candidates`` for the same target date with
-       the truncated slices.
-     - Locate the matching setup in the re-run output by a strict key
-       (symbol, killzone, direction, mss_confirm_time, sweep_candle_time,
-       swept_level_price). Two sweeps can lead to MSS at the same candle,
-       so the looser key would mis-match.
+1. Phase A — build the production-truthful setup pool. Across a sample
+   of trading dates (10y XAUUSD/NDX100 Databento fixtures, 60-day
+   lookback), run a legacy scan (``now_utc=None``) to find candidate
+   MSS-confirm times, then for each unique scheduler tick those imply,
+   re-run the detector with ``now_utc=tick`` on the same full window.
+   The setups returned by these now_utc-bounded runs are exactly what
+   the production scheduler would have emitted at the corresponding
+   ticks — phantom setups produced solely by the legacy leak are
+   correctly absent.
+2. Phase B — randomly sample N setups from the pool. For each setup
+   at MSS confirm time T:
+     - Slice the four OHLC frames to keep rows whose ``time <= T``
+       (the MSS candle is the latest visible — one M5 candle past it
+       has not yet closed at scheduler tick ``T+5min``).
+     - Re-run ``build_setup_candidates`` for the same target date,
+       passing ``now_utc = next_5min_tick_after(T)``.
+     - Locate the matching setup by strict key (symbol, killzone,
+       direction, mss_confirm, sweep_candle, swept_level_price).
      - Compare entry/SL/TP/swept-level/POI/quality fields.
-4. Write a report listing clean vs suspect setups.
+3. Write a report listing clean vs suspect setups. With the now_utc
+   fix in place we expect 30/30 clean: the detector is deterministic
+   under the now_utc bound regardless of whether df_m5 carries unused
+   future data.
 
 Output: ``calibration/runs/lookahead_audit_<UTC-timestamp>.txt``.
 
@@ -157,6 +164,24 @@ def _paris_date(utc_dt: datetime) -> date:
     return utc_dt.astimezone(_TZ_PARIS).date()
 
 
+def _next_5min_tick_after(t: datetime) -> datetime:
+    """Smallest 5-minute-aligned UTC instant strictly greater than ``t``.
+
+    Models the production scheduler's APScheduler 5-minute cron that
+    fires at :00, :05, :10, ..., :55. For an ``mss_confirm`` candle
+    open time aligned to a 5-min boundary, the candle closes at
+    ``mss_confirm + 5min`` (also aligned), so this returns
+    ``mss_confirm + 5min`` — the soonest scheduler tick at which the
+    just-closed MSS candle is observable.
+    """
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=UTC)
+    minute_floor = t.replace(second=0, microsecond=0, minute=(t.minute // 5) * 5)
+    if minute_floor <= t:
+        minute_floor = minute_floor + timedelta(minutes=5)
+    return minute_floor
+
+
 # ---------------------------------------------------------------------------
 # Setup signature — every field whose value should be identical between
 # the full-data run and the truncated re-run.
@@ -250,7 +275,12 @@ def _diff(a: dict, b: dict, prefix: str = "") -> list[str]:
 # Detection wrappers.
 # ---------------------------------------------------------------------------
 def _detect(
-    symbol: str, frames: dict[str, pd.DataFrame], target_date: date, settings
+    symbol: str,
+    frames: dict[str, pd.DataFrame],
+    target_date: date,
+    settings,
+    *,
+    now_utc: datetime | None = None,
 ) -> list[Setup]:
     return build_setup_candidates(
         df_h4=frames["H4"],
@@ -260,6 +290,7 @@ def _detect(
         target_date=target_date,
         symbol=symbol,
         settings=settings,
+        now_utc=now_utc,
     )
 
 
@@ -281,33 +312,69 @@ def run_audit(
     print(f"Loading fixtures from {_FIXTURE_DIR}")
     fixtures = {sym: FixtureCache(_load_instrument(sym)) for sym in instruments}
 
-    # Step A — collect setups across the sampled date space.
+    # Step A — build the production-truthful setup pool. Two-pass per
+    # date: a legacy scan (now_utc=None) discovers candidate
+    # ``mss_confirm`` times T; for EACH such T we then re-run the
+    # detector with ``now_utc = next_5min_tick_after(T)`` on the full
+    # window and keep only setups whose own ``mss_confirm`` equals T.
+    # Coupling the discovery now_utc to T (instead of running once per
+    # unique tick and accepting whatever surfaces) is essential: a
+    # setup at T_a discovered under tick(T_b≠T_a) may not reproduce
+    # under tick(T_a) — different now_utc, different FVG/sweep bounds
+    # → different setup. Phase B will use ``now_utc = next_5min_tick_after(T)``,
+    # so the pool must too.
     all_setups: list[Setup] = []
+    seen_keys: set[tuple] = set()
     for sym in instruments:
         cache = fixtures[sym]
         all_dates = _trading_dates_for(cache.bundle["M5"])
         in_range = [d for d in all_dates if start_d <= d <= end_d]
         date_sample = sorted(rng.sample(in_range, k=min(n_dates, len(in_range))))
-        print(f"  [{sym}] running detector across {len(date_sample)} sampled dates ...")
+        print(f"  [{sym}] discovering candidate ticks across {len(date_sample)} sampled dates ...")
         for d in date_sample:
             end_utc = _eod_paris_utc(d)
             sliced = cache.slice_window(end_utc, days_lookback)
             try:
-                setups = _detect(sym, sliced, d, settings)
+                legacy = _detect(sym, sliced, d, settings, now_utc=None)
             except Exception as exc:  # pragma: no cover — edge data only
-                print(f"    skip {sym} {d}: detection raised {exc!r}")
+                print(f"    skip {sym} {d}: legacy scan raised {exc!r}")
                 continue
-            all_setups.extend(setups)
-        print(f"  [{sym}] cumulative setups: " f"{sum(1 for s in all_setups if s.symbol == sym)}")
+            seen_T: set[datetime] = set()
+            for leg in legacy:
+                T_leg = leg.mss.mss_confirm_candle_time_utc
+                if T_leg in seen_T:
+                    continue
+                seen_T.add(T_leg)
+                tick = _next_5min_tick_after(T_leg)
+                try:
+                    truthful = _detect(sym, sliced, d, settings, now_utc=tick)
+                except Exception as exc:  # pragma: no cover — edge data only
+                    print(f"    skip {sym} {d} truthful@{tick}: {exc!r}")
+                    continue
+                for s in truthful:
+                    if s.mss.mss_confirm_candle_time_utc != T_leg:
+                        continue
+                    k = _setup_key(s)
+                    if k in seen_keys:
+                        continue
+                    seen_keys.add(k)
+                    all_setups.append(s)
+        print(
+            f"  [{sym}] cumulative truthful setups: "
+            f"{sum(1 for s in all_setups if s.symbol == sym)}"
+        )
 
-    print(f"Total setups collected: {len(all_setups)}")
+    print(f"Total truthful setups collected: {len(all_setups)}")
     if len(all_setups) == 0:
         raise SystemExit("No setups collected — cannot run the audit.")
 
     # Step B — sample setups.
     sample = rng.sample(all_setups, k=min(n_samples, len(all_setups)))
 
-    # Step C — re-run on truncated slices and compare.
+    # Step C — verify each on a slice that holds NO data past the MSS
+    # confirm candle. The detector with the same now_utc must reproduce
+    # the truthful setup bit-identically; any divergence implies a
+    # remaining leak path that the now_utc bound failed to catch.
     clean: list[Setup] = []
     suspect: list[dict] = []
     skipped: list[dict] = []
@@ -315,11 +382,21 @@ def run_audit(
     for i, original in enumerate(sample, 1):
         sym = original.symbol
         T = original.mss.mss_confirm_candle_time_utc
-        slice_end = T + timedelta(minutes=5)  # T + 1 M5 candle
+        tick = _next_5min_tick_after(T)
         target_d = _paris_date(T)
-        sliced = fixtures[sym].slice_window(slice_end, days_lookback)
+        # Phase A's truthful run sliced the fixture from
+        # eod_paris_utc(target_d) - days_lookback to eod_paris_utc.
+        # We MUST start from the same earliest candle here; otherwise
+        # the ATR Wilder seed differs and FVG ``size_atr_ratio`` /
+        # swing-amplitude tests can disagree on candles that should be
+        # identical. Achieve this by reusing the same wide slice and
+        # then truncating the M5/H1/H4/D1 frames to ``time <= T`` in
+        # memory — the detector then sees no candles past T but
+        # computes ATR on exactly the same underlying data.
+        sliced_full = fixtures[sym].slice_window(_eod_paris_utc(target_d), days_lookback)
+        sliced = {tf: df.loc[df["time"] <= T] for tf, df in sliced_full.items()}
         try:
-            re_setups = _detect(sym, sliced, target_d, settings)
+            re_setups = _detect(sym, sliced, target_d, settings, now_utc=tick)
         except Exception as exc:
             skipped.append(
                 {
@@ -403,7 +480,10 @@ def _write_report(args: argparse.Namespace, result: dict) -> Path:
     lines.append(f"  date sample : {args.n_dates} per instrument")
     lines.append(f"  setup pool  : {result['total_setups_pool']} ({result['by_symbol_pool']})")
     lines.append(f"  audited     : {args.n_samples} (seed={args.seed})")
-    lines.append("  slice rule  : keep rows with time <= mss_confirm + 5min")
+    lines.append(
+        "  slice rule  : Phase B keeps rows with time <= mss_confirm; "
+        "now_utc = next_5min_tick_after(mss_confirm)"
+    )
     lines.append(f"  lookback    : {args.days_lookback} days")
     lines.append("=" * 78)
     lines.append("")
@@ -449,8 +529,9 @@ def _write_report(args: argparse.Namespace, result: dict) -> Path:
     if not suspect and not skipped:
         lines.append(
             "ALL CLEAN — every audited setup is reproduced bit-identically by the "
-            "detector when only data up to MSS_confirm + 5min is available. The "
-            "detector does not appear to use future data on this sample."
+            "detector when df_m5 holds no candles past mss_confirm. The "
+            "now_utc bound is consistent on this sample: full-data and truncated "
+            "runs agree, so no future data leaks into historical detections."
         )
     elif suspect:
         lines.append(
