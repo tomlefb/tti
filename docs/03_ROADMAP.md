@@ -320,18 +320,49 @@ LLM-qualifier ROI.
 
 ---
 
+## Sprint 6.6 — Drop ETHUSD from live portfolio
+
+**Goal**: ship a clean XAU + NDX portfolio after the A-grade filter
+inversion on ETH was identified post-Sprint 6.5.
+
+Deliverables:
+
+- [x] `WATCHED_PAIRS` updated to `["XAUUSD", "NDX100"]` in
+      `config/settings.py.example`.
+- [x] ETHUSD `INSTRUMENT_CONFIG` block preserved (commented out) so the
+      instrument can be re-added after dedicated calibration without
+      re-deriving the ATR-fraction buffers.
+- [x] CLAUDE.md rule #9 updated to reflect the new validated portfolio
+      and the reasoning behind the ETH drop.
+- [x] `docs/05_TRADING_RULES.md` updated to mention the XAU+NDX
+      portfolio.
+- [x] Validation backtest re-run on the trimmed portfolio
+      (`calibration/runs/{TIMESTAMP}_sprint_6_6_portfolio_validation.md`).
+
+**Done when**: clean XAU+NDX portfolio validated; configuration ready
+for Sprint 7 (auto-execution / LLM qualifier).
+
+Key finding: A-grade filter inverts on ETH (mean R -0.42 on 26 setups,
+vs +0.27 all-qualities, per
+`calibration/runs/2026-04-30T06-58-43Z_final_portfolio_validation.md`).
+Likely cause: grader thresholds calibrated on FX/equity microstructure
+don't transfer cleanly to crypto. ETH calibration deferred until
+post-live data collection — config preserved, not deleted.
+
+---
+
 ## Current state
 
-- **Active sprint**: 6.5 — live paper trading on validated portfolio
-  (XAUUSD, NDX100, ETHUSD), A-grade-only notifications. Sprint 7
-  (LLM qualifier) deferred until 4-6 weeks of live data collected.
-- **Last updated**: Sprint 6.5 deployment configuration complete
-  2026-04-30. Two grid search sessions on extended fixtures (16-25 mo)
-  cleared the portfolio: only XAU/NDX/ETH passed the SHIP / DEFAULT_SHIPS
-  bar. Notification gating shipped (A+/A only); B-grade setups remain
-  in the journal with `was_notified=False` for false-negative audits.
-  Sprint 6 field test rolls into Sprint 6.5 paper trading on the
-  reduced portfolio.
+- **Active sprint**: 6.6 → ready for Sprint 7. Live portfolio is
+  XAUUSD + NDX100 only, A-grade-only notifications. ETHUSD config
+  preserved (commented out) in `config/settings.py.example` for future
+  re-add after dedicated crypto-microstructure calibration of the
+  A-grade filter.
+- **Last updated**: Sprint 6.6 complete 2026-05-01. ETHUSD removed from
+  live portfolio after Sprint 6.5's `final_portfolio_validation` run
+  surfaced an A-grade filter inversion on ETH (-0.42 mean R / 26 A-grade
+  setups vs +0.27 all-qualities). Trimmed portfolio re-validated; field
+  test resumes on XAU+NDX.
 
 Each sprint completion: update this section with `Active sprint`, key
 findings from the previous sprint, and any roadmap revisions.

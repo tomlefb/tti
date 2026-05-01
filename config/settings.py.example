@@ -27,23 +27,27 @@ TZ_UTC = ZoneInfo("UTC")
 TZ_NY = ZoneInfo("America/New_York")
 
 # -----------------------------------------------------------------------------
-# Watched instruments — validated portfolio (Sprint 6.5)
+# Watched instruments — validated portfolio (Sprint 6.6)
 # -----------------------------------------------------------------------------
 # Symbol names must match those exposed by the MT5 terminal (varies by broker).
 # Adjust if your broker uses different symbol names (e.g., "XAUUSD.r" instead of "XAUUSD").
 #
+# Sprint 6.5 portfolio was XAU + NDX + ETH. Post-Sprint 6.5 analysis showed the
+# A-grade filter inverts on ETH (mean R = -0.42 on 26 A-grade setups vs +0.27
+# all-qualities) — likely cause: grader thresholds calibrated on FX/equity
+# microstructure don't transfer cleanly to crypto. Sprint 6.6 drops ETH from
+# the live portfolio. ETHUSD config preserved (commented out below) so the
+# instrument can be re-added after dedicated calibration work.
+#
 # Backtest validation on extended fixtures (16-25 mo, 70/30 chronological
 # train/holdout split per docs/07 §3, anti-overfit flags) eliminated EURUSD,
-# GBPUSD, USOUSD, US30, GER30, SPX500, BTCUSD, USDJPY, XAGUSD. Only the three
-# instruments below cleared the SHIP / DEFAULT_SHIPS bar:
+# GBPUSD, USOUSD, US30, GER30, SPX500, BTCUSD, USDJPY, XAGUSD. Only the two
+# instruments below clear the live-deployment bar:
 #   - XAUUSD: operator-validated baseline (Sprint 1-3)
 #   - NDX100: operator-validated baseline (Sprint 1-3)
-#   - ETHUSD: DEFAULT_SHIPS verdict — default holdout +0.526R / 35 setups
-#     (calibration/runs/2026-04-29T13-59-44Z_grid_search_extended_fast.md)
 WATCHED_PAIRS = [
     "XAUUSD",
     "NDX100",  # may be "USTEC", "NAS100", "NQ100", etc. depending on broker
-    "ETHUSD",  # crypto via MT5 broker symbol — verify exact name per broker
 ]
 
 # Notification gating: only A+/A grades go to Telegram. B-grades are still
@@ -222,17 +226,23 @@ INSTRUMENT_CONFIG = {
         "equal_hl_tolerance": 0.00030,
         "sl_buffer": 0.00050,
     },
+    # Sprint 6.6: ETHUSD config preserved but instrument NOT in WATCHED_PAIRS.
+    # Re-enable after dedicated calibration of the A-grade filter on crypto
+    # microstructure (Sprint 6.5 deployment showed a -0.42 mean R inversion
+    # on ETH A-grade setups). To re-add: uncomment the block below and add
+    # "ETHUSD" back to WATCHED_PAIRS.
+    #
     # ETHUSD — derived via ATR-fraction normalization (Sprint 6.5).
     # Median M5 ATR(14) over 16-mo extended fixture ≈ 7.87 USD.
     # Coefficients (sweep=0.15, equal_hl=0.10, sl=0.15) match the
     # operator-validated XAU/NDX scale (XAU sweep_buffer / median ATR ≈ 0.17,
     # NDX ≈ 0.14 → 0.15 default). Operator should re-eyeball on TradingView
     # before extended live use; revisit if false-positive sweep rate is high.
-    "ETHUSD": {
-        "sweep_buffer": 1.18,  # 0.15 × 7.87 USD
-        "equal_hl_tolerance": 0.79,  # 0.10 × 7.87 USD
-        "sl_buffer": 1.18,  # 0.15 × 7.87 USD
-    },
+    # "ETHUSD": {
+    #     "sweep_buffer": 1.18,  # 0.15 × 7.87 USD
+    #     "equal_hl_tolerance": 0.79,  # 0.10 × 7.87 USD
+    #     "sl_buffer": 1.18,  # 0.15 × 7.87 USD
+    # },
 }
 
 # -----------------------------------------------------------------------------

@@ -41,13 +41,17 @@ mechanical filter.
    decided. Missed setups must be debuggable after the fact.
 8. **Funded Next account is at risk.** Hard-code drawdown limits as a
    safety layer (system stops sending notifications if daily loss exceeded).
-9. **Validated WATCHED_PAIRS.** The system trades XAUUSD + NDX100 + ETHUSD
-   only. These are the three instruments validated via backtest on extended
-   fixtures (Sprint 6.5). Other instruments tested (USOUSD, US30, GER30,
-   SPX500, BTCUSD, USDJPY, XAGUSD) all dropped due to insufficient or
-   negative edge. See
-   `calibration/runs/2026-04-29T*_grid_search_extended_fast*.md` for the
-   validation report. Do not add pairs without re-running the validation.
+9. **Validated WATCHED_PAIRS.** Validated portfolio for live deployment is
+   XAUUSD + NDX100 (A/A+ qualities only). ETHUSD was tested in Sprint 6.5
+   but dropped in Sprint 6.6 due to A-grade filter inversion on crypto
+   microstructure (mean R = -0.42 on 26 A-grade setups, vs +0.27 on
+   all-quality). ETHUSD config preserved in `config/settings.py.example`
+   for future re-calibration but is not actively watched. Other instruments
+   tested (EURUSD, GBPUSD, USOUSD, US30, GER30, SPX500, BTCUSD, USDJPY,
+   XAGUSD) all dropped at Sprint 6.5 due to insufficient or negative edge.
+   See `calibration/runs/2026-04-29T*_grid_search_extended_fast*.md` and
+   `calibration/runs/*_sprint_6_6_portfolio_validation.md` for the
+   validation reports. Do not add pairs without re-running the validation.
 10. **Notification gating by quality.** `NOTIFY_QUALITIES = ["A+", "A"]`
     is the live-deployment default — B-grade detections are still produced
     by the orchestrator and journaled (`was_notified=False`) so the

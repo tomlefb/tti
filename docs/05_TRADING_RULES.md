@@ -15,6 +15,15 @@ system stops sending notifications for the rest of the day (or session).
 - **Addon**: EA enabled (used only to allow Python scripts to read MT5,
   NOT to auto-trade — see rule below)
 
+### Watched instruments (Sprint 6.6 portfolio)
+
+The system watches XAUUSD and NDX100 only (Sprint 6.6 portfolio,
+A+/A-grade notifications only). ETHUSD is configured in
+`config/settings.py.example` but commented out and not actively
+monitored — pending dedicated calibration of the A-grade filter on
+crypto microstructure (see Sprint 6.6 in `docs/03_ROADMAP.md` for the
+context behind the drop).
+
 ### Phase 1 objectives (as observed on dashboard)
 
 | Metric | Limit |
