@@ -125,7 +125,16 @@ def detect_mss(
     closes = df_m5["close"].to_numpy(dtype="float64")
 
     # Significant M5 swings — needed to identify the level whose break
-    # constitutes the structure shift.
+    # constitutes the structure shift. Deliberately called WITHOUT
+    # ``now_utc``: the swing-confirmation leak that affects
+    # ``mark_swing_levels`` (post-MSS-time data inflating the trailing-N
+    # significant-swing window) does NOT apply here, because the MSS
+    # iteration below caps each candidate's pivot index at
+    # ``i - swing_confirmation_offset``. That guarantees every pivot the
+    # MSS detector reads has been confirmed by candle ``i`` (the MSS
+    # candidate itself), so any pivot data past ``i`` is naturally
+    # ignored. Adding ``now_utc`` here would be a no-op and only obscure
+    # the contract.
     sig_swings = find_swings(
         df_m5,
         lookback=swing_lookback_m5,

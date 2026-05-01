@@ -144,6 +144,15 @@ def compute_daily_bias(
     Returns:
         ``"bullish" | "bearish" | "no_trade"``.
     """
+    # NB: deliberately called without ``now_utc``. The orchestrator pre-slices
+    # df_h4 / df_h1 to ``time < kz_start_utc`` (see
+    # ``setup._slice_frame_until``) before reaching this function, which
+    # already enforces the swing-confirmation bound: a pivot at index k is
+    # only detectable here if the lookback-after candles also fall within
+    # the slice (i.e. before kz_start_utc). Since ``kz_start_utc <= now_utc``
+    # for any setup the orchestrator will eventually emit, the bias is
+    # unaffected by the swing-confirmation leak and forwarding ``now_utc``
+    # would be redundant.
     swings_h4 = find_swings(
         df_h4,
         lookback=swing_lookback_h4,

@@ -20,6 +20,8 @@ dependency on pandas-ta (per CLAUDE.md tech-stack note).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import numpy as np
 import pandas as pd
 
@@ -83,7 +85,12 @@ def _atr(df: pd.DataFrame, period: int) -> pd.Series:
     return atr
 
 
-def find_raw_swings(df: pd.DataFrame, lookback: int) -> pd.DataFrame:
+def find_raw_swings(
+    df: pd.DataFrame,
+    lookback: int,
+    *,
+    now_utc: datetime | None = None,
+) -> pd.DataFrame:
     """Detect raw swing highs and lows using an N-bar fractal definition.
 
     A candle at index ``i`` is a swing high iff its ``high`` is strictly
@@ -97,11 +104,25 @@ def find_raw_swings(df: pd.DataFrame, lookback: int) -> pd.DataFrame:
     Candles within ``lookback`` of either edge of ``df`` cannot be confirmed
     and have ``swing_type=None``.
 
+    Real-time safety: when ``now_utc`` is provided, a pivot at index ``i``
+    is only emitted if its **confirmation candle** — the bar at index
+    ``i + lookback`` — has closed by ``now_utc`` (its ``open + timeframe
+    <= now_utc``). The timeframe is inferred from the median spacing of
+    consecutive bars in ``df``, so the same rule works for M5, H1, H4 or
+    D1. Without this bound the function would emit pivots whose lookback-
+    after candles fall in the future relative to the production scheduler
+    tick — the leak documented in
+    ``calibration/runs/FINAL_lookahead_audit_phase_a_partial_2026-05-01.md``.
+
     Args:
         df: OHLC frame indexed however the caller prefers; must contain the
-            ``high`` and ``low`` columns. May be empty.
+            ``high`` and ``low`` columns. When ``now_utc`` is provided the
+            ``time`` column is also required (UTC tz-aware). May be empty.
         lookback: number of candles each side that must be lower (for a
             high) / higher (for a low). Must be ``>= 1``.
+        now_utc: optional production scheduler tick. ``None`` (default) is
+            the legacy unconstrained mode used by tests and the pre-fix
+            backtest harness.
 
     Returns:
         DataFrame with the same index as ``df`` and columns:
@@ -120,10 +141,30 @@ def find_raw_swings(df: pd.DataFrame, lookback: int) -> pd.DataFrame:
     high = df["high"].to_numpy(dtype="float64")
     low = df["low"].to_numpy(dtype="float64")
 
+    times_py: list[datetime] | None = None
+    timeframe_td: timedelta | None = None
+    if now_utc is not None:
+        if "time" not in df.columns:
+            raise ValueError("find_raw_swings: 'time' column required when now_utc is set")
+        ts = pd.to_datetime(df["time"], utc=True)
+        times_py = [pd.Timestamp(t).to_pydatetime() for t in ts]
+        if n >= 2:
+            diffs = pd.Series(times_py[1:]) - pd.Series(times_py[:-1])
+            timeframe_td = pd.Timedelta(diffs.median()).to_pytimedelta()
+
     swing_type = np.full(n, None, dtype=object)
     swing_price = np.full(n, np.nan, dtype="float64")
 
     for i in range(lookback, n - lookback):
+        if (
+            now_utc is not None
+            and times_py is not None
+            and timeframe_td is not None
+            and times_py[i + lookback] + timeframe_td > now_utc
+        ):
+            # Confirmation candle has not closed yet at now_utc — pivot
+            # is not yet observable in real time.
+            continue
         h = high[i]
         ll = low[i]
         left_h = high[i - lookback : i]
@@ -230,6 +271,8 @@ def find_swings(
     lookback: int,
     min_amplitude_atr_mult: float,
     atr_period: int = 14,
+    *,
+    now_utc: datetime | None = None,
 ) -> pd.DataFrame:
     """Convenience wrapper: ``find_raw_swings`` then ``filter_significant_swings``.
 
@@ -238,9 +281,10 @@ def find_swings(
         lookback: bars each side for the fractal definition.
         min_amplitude_atr_mult: amplitude filter multiplier.
         atr_period: ATR window for the amplitude filter.
+        now_utc: forwarded to ``find_raw_swings`` — see its docstring.
 
     Returns:
         DataFrame of significant swings (same schema as the two stages).
     """
-    raw = find_raw_swings(df, lookback)
+    raw = find_raw_swings(df, lookback, now_utc=now_utc)
     return filter_significant_swings(raw, df, min_amplitude_atr_mult, atr_period)

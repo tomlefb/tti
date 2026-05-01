@@ -344,6 +344,7 @@ def build_setup_candidates(
             as_of_utc=kz_start_utc,
             equal_hl_tolerance=instr_cfg["equal_hl_tolerance"],
             settings=settings,
+            now_utc=now_utc,
         )
 
         # The sweep window is bounded by the killzone end and (when set)
@@ -440,6 +441,7 @@ def _build_marked_levels(
     as_of_utc: datetime,
     equal_hl_tolerance: float,
     settings: SetupSettings,
+    now_utc: datetime | None = None,
 ) -> tuple[
     AsianRange | None,
     DailyLevels | None,
@@ -460,6 +462,7 @@ def _build_marked_levels(
         n_swings=settings.SWING_LEVELS_LOOKBACK_COUNT,
         h4_h1_time_tolerance_h4_candles=settings.H4_H1_TIME_TOLERANCE_CANDLES_H4,
         h4_h1_price_tolerance_fraction=settings.H4_H1_PRICE_TOLERANCE_FRACTION,
+        now_utc=now_utc,
     )
     equals = find_equal_highs_lows(swings, equal_hl_tolerance=equal_hl_tolerance)
     levels = (

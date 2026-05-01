@@ -279,6 +279,7 @@ def mark_swing_levels(
     h4_h1_time_tolerance_h4_candles: int = 2,
     h4_h1_price_tolerance_fraction: float = 0.001,
     atr_period: int = 14,
+    now_utc: datetime | None = None,
 ) -> list[SwingLevel]:
     """Multi-TF confluence promotion. See FINAL_swing_calibration.md §H1.
 
@@ -302,7 +303,11 @@ def mark_swing_levels(
     Args:
         df_h4: H4 OHLC frame.
         df_h1: H1 OHLC frame.
-        as_of_utc: cutoff; future swings are dropped.
+        as_of_utc: cutoff for **pivot time**; swings whose pivot time
+            exceeds ``as_of_utc`` are dropped. Note this is a different
+            cutoff from ``now_utc`` (see below): a pivot can have
+            ``time <= as_of_utc`` but a confirmation candle that has
+            not yet closed at ``now_utc``. Both filters must apply.
         lookback_h4 / lookback_h1: fractal lookback per timeframe.
         min_amplitude_atr_mult_h4: ATR-amplitude filter multiplier on H4.
         min_amplitude_atr_mult_h1: ATR-amplitude filter multiplier on H1.
@@ -310,6 +315,14 @@ def mark_swing_levels(
         h4_h1_time_tolerance_h4_candles: matching window in H4 candles.
         h4_h1_price_tolerance_fraction: matching window in price (fraction).
         atr_period: ATR window for the amplitude filter.
+        now_utc: optional production scheduler tick. Forwarded to
+            ``find_swings`` so a pivot is only emitted if its
+            confirmation candle has closed by ``now_utc``. Without
+            this bound the H4 / H1 pivot list shifts as more future
+            data becomes available, perturbing the trailing
+            ``n_swings`` window and changing the opposing-liquidity
+            target picked downstream — see audit findings at
+            calibration/runs/FINAL_lookahead_audit_phase_a_partial_2026-05-01.md.
 
     Returns:
         ``list[SwingLevel]`` sorted ``time_utc`` descending.
@@ -319,12 +332,14 @@ def mark_swing_levels(
         lookback=lookback_h4,
         min_amplitude_atr_mult=min_amplitude_atr_mult_h4,
         atr_period=atr_period,
+        now_utc=now_utc,
     )
     swings_h1 = find_swings(
         df_h1,
         lookback=lookback_h1,
         min_amplitude_atr_mult=min_amplitude_atr_mult_h1,
         atr_period=atr_period,
+        now_utc=now_utc,
     )
 
     h4_sigs = _significant_swings_with_time(swings_h4, df_h4, as_of_utc)
