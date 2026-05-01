@@ -603,6 +603,27 @@ class MT5Client:
             return False
         return True
 
+    def close_position_at_market(self, ticket: int) -> bool:
+        """Close the entire volume of an open position at market.
+
+        Used by the recovery layer to close orphan positions detected at
+        scheduler startup. Internally a thin wrapper over
+        :meth:`close_partial_position` with ``volume = position.volume``.
+        """
+        positions = self._mt5.positions_get() if self._mt5 is not None else None
+        if not positions:
+            return False
+        match = None
+        for p in positions:
+            if int(getattr(p, "ticket", -1)) == int(ticket):
+                match = p
+                break
+        if match is None:
+            return False
+        return self.close_partial_position(
+            ticket=int(ticket), volume=float(getattr(match, "volume", 0.0))
+        )
+
     def get_position_close_info(self, ticket: int) -> dict[str, Any] | None:
         """Return ``{exit_price, exit_time_utc, profit_usd}`` for a closed
         position, or ``None`` if no exit deal exists yet.

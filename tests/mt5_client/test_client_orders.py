@@ -463,3 +463,52 @@ def test_get_position_close_info_returns_none_for_unknown_ticket():
     mt5.history_deals_get.return_value = []
     client = _connected_client(mt5)
     assert client.get_position_close_info(999) is None
+
+
+# -----------------------------------------------------------------------------
+# close_position_at_market (used by recovery for orphan handling)
+# -----------------------------------------------------------------------------
+
+
+def test_close_position_at_market_closes_full_volume_opposite_side():
+    mt5 = MagicMock()
+    real_now_utc = datetime.now(tz=UTC).replace(microsecond=0)
+    mt5.positions_get.return_value = [
+        SimpleNamespace(
+            ticket=42,
+            symbol="XAUUSD",
+            type=1,  # short
+            volume=0.05,
+            price_open=4360.0,
+            sl=4375.0,
+            tp=4080.5,
+            magic=7766,
+            time=int(real_now_utc.timestamp()),
+            profit=0.0,
+        )
+    ]
+    mt5.symbol_info_tick.return_value = SimpleNamespace(
+        bid=4280.0,
+        ask=4280.5,
+        time=real_now_utc.timestamp() + 3 * 3600,
+    )
+    mt5.order_send.return_value = SimpleNamespace(retcode=10009, comment="Done")
+    mt5.TRADE_ACTION_DEAL = 1
+    mt5.ORDER_TYPE_BUY = 0
+    mt5.ORDER_TYPE_SELL = 1
+    client = _connected_client(mt5)
+
+    ok = client.close_position_at_market(42)
+    assert ok is True
+    args, _ = mt5.order_send.call_args
+    request = args[0]
+    assert request["volume"] == 0.05  # full volume
+    assert request["position"] == 42
+    assert request["type"] == mt5.ORDER_TYPE_BUY  # close short with BUY
+
+
+def test_close_position_at_market_returns_false_on_unknown_ticket():
+    mt5 = MagicMock()
+    mt5.positions_get.return_value = []
+    client = _connected_client(mt5)
+    assert client.close_position_at_market(999) is False
