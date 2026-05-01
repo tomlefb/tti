@@ -21,7 +21,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.detection.setup import Setup
-from src.journal.models import DailyStateRow, DecisionRow, OutcomeRow, SetupRow
+from src.journal.models import (
+    DailyStateRow,
+    DecisionRow,
+    OrderRow,
+    OutcomeRow,
+    SetupRow,
+    SpreadAnomalyRow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -260,3 +267,183 @@ def upsert_daily_state(session: Session, day: date, **fields: Any) -> None:
 def get_daily_state(session: Session, day: date) -> DailyStateRow | None:
     """Fetch the daily_state for ``day``, or ``None``."""
     return session.get(DailyStateRow, day)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 7 — auto-execution surface
+# ---------------------------------------------------------------------------
+
+
+def insert_order(
+    session: Session,
+    *,
+    setup_uid: str,
+    mt5_ticket: int,
+    symbol: str,
+    direction: str,
+    volume: float,
+    entry_price: float,
+    stop_loss: float,
+    tp1: float,
+    tp_runner: float,
+    placed_at_utc: datetime,
+    status: str,
+    notes: str | None = None,
+) -> OrderRow:
+    """Persist an order row. Raises ``ValueError`` on duplicate ticket.
+
+    Caller responsibilities:
+
+    - ``setup_uid`` must reference an existing ``setups`` row (FK enforced
+      by the schema; AttributeError surfaces fast if violated).
+    - ``status`` is one of ``{"pending", "filled", "cancelled", "sl_hit",
+      "tp1_hit", "tp_runner_hit"}``. The repository does not enumerate to
+      keep this layer thin — :mod:`src.execution.position_lifecycle`
+      drives the transitions.
+    """
+    existing = session.execute(
+        select(OrderRow).where(OrderRow.mt5_ticket == mt5_ticket)
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise ValueError(f"order with ticket {mt5_ticket!r} already exists")
+
+    row = OrderRow(
+        setup_uid=setup_uid,
+        mt5_ticket=int(mt5_ticket),
+        symbol=symbol,
+        direction=direction,
+        volume=float(volume),
+        entry_price=float(entry_price),
+        stop_loss=float(stop_loss),
+        tp1=float(tp1),
+        tp_runner=float(tp_runner),
+        placed_at_utc=placed_at_utc,
+        status=status,
+        notes=notes,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def get_order_by_ticket(session: Session, ticket: int) -> OrderRow | None:
+    """Fetch one order by MT5 ticket. Returns ``None`` if not found."""
+    return session.execute(
+        select(OrderRow).where(OrderRow.mt5_ticket == int(ticket))
+    ).scalar_one_or_none()
+
+
+def get_order_by_setup_uid(session: Session, setup_uid: str) -> OrderRow | None:
+    """Fetch the (single) order placed for a given setup. ``None`` if absent.
+
+    A setup spawns at most one order under the standard pipeline — only
+    the first ``place_order`` per detected setup runs (re-running a
+    cycle on the same minute is idempotent at the journal layer via
+    ``insert_setup``'s setup_uid uniqueness).
+    """
+    return session.execute(
+        select(OrderRow).where(OrderRow.setup_uid == setup_uid)
+    ).scalar_one_or_none()
+
+
+def update_order_status(
+    session: Session,
+    *,
+    ticket: int,
+    status: str,
+    **fields: Any,
+) -> None:
+    """Update an order's ``status`` and any of: ``filled_at_utc``,
+    ``closed_at_utc``, ``realized_r``, ``notes``.
+
+    Raises:
+        ValueError: no order with that ticket.
+        AttributeError: an unknown field name was passed (typo guard).
+    """
+    row = session.execute(
+        select(OrderRow).where(OrderRow.mt5_ticket == int(ticket))
+    ).scalar_one_or_none()
+    if row is None:
+        raise ValueError(f"no order with ticket={ticket!r}")
+
+    row.status = status
+    allowed = {"filled_at_utc", "closed_at_utc", "realized_r", "notes"}
+    for key, value in fields.items():
+        if key not in allowed:
+            raise AttributeError(
+                f"OrderRow has no settable field {key!r} (allowed: {sorted(allowed)})"
+            )
+        setattr(row, key, value)
+    session.flush()
+
+
+def list_open_orders_with_status(
+    session: Session, *, statuses: list[str]
+) -> list[OrderRow]:
+    """List orders matching any of the given statuses, oldest first.
+
+    Used by:
+
+    - position lifecycle: ``["filled"]`` for active position monitoring.
+    - end-of-killzone cleanup: ``["pending"]`` to cancel unfilled limits.
+    - recovery on startup: ``["pending", "filled"]`` to reconcile against
+      MT5 state.
+    """
+    stmt = (
+        select(OrderRow)
+        .where(OrderRow.status.in_(list(statuses)))
+        .order_by(OrderRow.placed_at_utc.asc())
+    )
+    return list(session.execute(stmt).scalars().all())
+
+
+def insert_spread_anomaly(
+    session: Session,
+    *,
+    detected_at_utc: datetime,
+    symbol: str,
+    spread: float,
+    typical_spread: float | None = None,
+    setup_uid: str | None = None,
+    action_taken: str | None = None,
+) -> SpreadAnomalyRow:
+    """Persist a spread anomaly row (no duplicate check — anomalies are
+    timestamped events, not unique on any natural key)."""
+    row = SpreadAnomalyRow(
+        detected_at_utc=detected_at_utc,
+        symbol=symbol,
+        spread=float(spread),
+        typical_spread=float(typical_spread) if typical_spread is not None else None,
+        setup_uid=setup_uid,
+        action_taken=action_taken,
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def disable_auto_trading_for_day(
+    session: Session, *, day: date, reason: str
+) -> None:
+    """Flip ``auto_trading_disabled=True`` and set ``disabled_reason`` for
+    the given trading day. Creates the daily_state row if absent.
+
+    Other columns on an existing row (bias_*, trades_taken_count,
+    daily_loss_usd, …) are left untouched.
+    """
+    row = session.get(DailyStateRow, day)
+    if row is None:
+        row = DailyStateRow(date=day, updated_at=_now_utc())
+        session.add(row)
+    row.auto_trading_disabled = True
+    row.disabled_reason = reason
+    row.updated_at = _now_utc()
+    session.flush()
+
+
+def is_auto_trading_disabled(session: Session, *, day: date) -> bool:
+    """Return ``True`` iff the daily_state row for ``day`` flags trading off."""
+    row = session.get(DailyStateRow, day)
+    if row is None:
+        return False
+    return bool(row.auto_trading_disabled)

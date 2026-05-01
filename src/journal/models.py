@@ -132,11 +132,14 @@ class OutcomeRow(Base):
 
 
 class DailyStateRow(Base):
-    """Aggregate state per UTC date — drives Sprint 6 hard stops.
+    """Aggregate state per UTC date — drives Sprint 6 hard stops + Sprint 7
+    auto-trading kill flag.
 
-    Sprint 5 only creates the schema and basic upsert. The detection
-    pipeline can optionally cache its bias decisions here, but the
-    scheduler in Sprint 6 owns full population.
+    Sprint 5 only creates the schema and basic upsert. Sprint 6 wires the
+    scheduler to populate trades_taken / loss / stop_triggered fields.
+    Sprint 7 extends with ``auto_trading_disabled`` (set by the safe-guards
+    layer when the daily-loss circuit breaker fires) and ``disabled_reason``
+    (free-form tag, e.g. ``"daily_loss_circuit_breaker"``).
     """
 
     __tablename__ = "daily_state"
@@ -159,4 +162,80 @@ class DailyStateRow(Base):
     daily_loss_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     daily_stop_triggered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # Sprint 7 — auto-execution kill flag.
+    auto_trading_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    disabled_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class OrderRow(Base):
+    """One row per limit order placed by the auto-execution module (Sprint 7).
+
+    ``mt5_ticket`` is the broker order/position identifier returned by
+    ``mt5.order_send`` and is unique across the table. ``status`` walks
+    the lifecycle ``pending → filled → (tp1_hit | tp_runner_hit | sl_hit |
+    cancelled)`` — see ``src.execution.position_lifecycle`` for the
+    transitions.
+
+    ``setup_uid`` is the FK back to the originating setup so a journal
+    query can join order → setup → outcome end-to-end.
+    """
+
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    setup_uid: Mapped[str] = mapped_column(
+        String, ForeignKey("setups.setup_uid", ondelete="CASCADE"), nullable=False
+    )
+    mt5_ticket: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    direction: Mapped[str] = mapped_column(String, nullable=False)
+    volume: Mapped[float] = mapped_column(Float, nullable=False)
+
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_loss: Mapped[float] = mapped_column(Float, nullable=False)
+    tp1: Mapped[float] = mapped_column(Float, nullable=False)
+    tp_runner: Mapped[float] = mapped_column(Float, nullable=False)
+
+    placed_at_utc: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    filled_at_utc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    closed_at_utc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    realized_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    __table_args__ = (
+        Index("ix_orders_setup_uid", "setup_uid"),
+        Index("ix_orders_status", "status"),
+        Index("ix_orders_placed_at_utc", "placed_at_utc"),
+    )
+
+
+class SpreadAnomalyRow(Base):
+    """One row per spread anomaly observed at place_order time (Sprint 7).
+
+    The system does NOT block on wide spreads (operator's call — see
+    docs/04 §"Auto-execution rules"). Anomalies are journaled for
+    post-mortem analysis instead. ``setup_uid`` is nullable so a periodic
+    health-check observation outside any setup context can still be
+    logged.
+    """
+
+    __tablename__ = "spread_anomalies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    detected_at_utc: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    spread: Mapped[float] = mapped_column(Float, nullable=False)
+    typical_spread: Mapped[float | None] = mapped_column(Float, nullable=True)
+    setup_uid: Mapped[str | None] = mapped_column(
+        String, ForeignKey("setups.setup_uid", ondelete="SET NULL"), nullable=True
+    )
+    action_taken: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    __table_args__ = (
+        Index("ix_spread_anomalies_symbol", "symbol"),
+        Index("ix_spread_anomalies_detected_at_utc", "detected_at_utc"),
+    )
