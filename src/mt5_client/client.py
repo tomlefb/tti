@@ -31,6 +31,7 @@ from src.mt5_client.exceptions import (
     MT5AccountError,
     MT5ConnectionError,
     MT5DataError,
+    MT5Error,
 )
 from src.mt5_client.time_conversion import (
     broker_naive_seconds_to_utc,
@@ -69,6 +70,68 @@ class AccountInfo:
     profit: float  # current floating P&L on open positions
     margin_level: float  # equity / margin × 100, or 0 if no open positions
     leverage: int
+
+
+@dataclass(frozen=True)
+class SymbolInfoSnapshot:
+    """Subset of ``mt5.symbol_info()`` used by the order_manager.
+
+    ``trade_contract_size``, ``volume_min``, ``volume_step``,
+    ``volume_max`` drive position sizing. ``ask`` / ``bid`` drive the
+    spread anomaly check. ``point`` is exposed for callers that need it.
+    """
+
+    symbol: str
+    trade_contract_size: float
+    point: float
+    volume_min: float
+    volume_step: float
+    volume_max: float
+    ask: float
+    bid: float
+
+
+@dataclass(frozen=True)
+class PositionSnapshot:
+    """One row from ``mt5.positions_get()`` reduced to the fields the
+    Sprint 7 lifecycle / recovery modules actually use."""
+
+    ticket: int
+    symbol: str
+    direction: str  # "long" or "short"
+    volume: float
+    entry_price: float
+    sl: float
+    tp: float
+    magic: int
+    time_open_utc: datetime
+    profit: float
+
+
+@dataclass(frozen=True)
+class PendingOrderSnapshot:
+    """One row from ``mt5.orders_get()`` reduced to the same shape."""
+
+    ticket: int
+    symbol: str
+    direction: str
+    volume: float
+    price_open: float
+    sl: float
+    tp: float
+    magic: int
+    time_setup_utc: datetime
+
+
+@dataclass(frozen=True)
+class OrderSendResult:
+    """Subset of ``mt5.order_send()`` return value."""
+
+    retcode: int
+    order: int
+    deal: int
+    comment: str
+    request_id: int
 
 
 class MT5Client:
@@ -292,6 +355,164 @@ class MT5Client:
             return []
 
         return list(_deals_to_trades(deals, offset_hours=offset))
+
+    # ------------------------------------------------------------------
+    # Sprint 7 — order operations
+    # ------------------------------------------------------------------
+
+    def get_symbol_info(self, symbol: str) -> SymbolInfoSnapshot:
+        """Return the trading parameters for ``symbol``.
+
+        Raises:
+            MT5Error: ``mt5.symbol_info()`` returned ``None`` (symbol
+                unknown to the broker, or terminal disconnected).
+            MT5ConnectionError: client not connected.
+        """
+        self._require_connected()
+        info = self._mt5.symbol_info(symbol)
+        if info is None:
+            err = self._safe_last_error()
+            raise MT5Error(f"symbol_info({symbol!r}) returned None. last_error={err!r}")
+        return SymbolInfoSnapshot(
+            symbol=str(getattr(info, "name", symbol)),
+            trade_contract_size=float(getattr(info, "trade_contract_size", 1.0)),
+            point=float(getattr(info, "point", 0.0)),
+            volume_min=float(getattr(info, "volume_min", 0.01)),
+            volume_step=float(getattr(info, "volume_step", 0.01)),
+            volume_max=float(getattr(info, "volume_max", 100.0)),
+            ask=float(getattr(info, "ask", 0.0)),
+            bid=float(getattr(info, "bid", 0.0)),
+        )
+
+    def place_limit_order(
+        self,
+        *,
+        symbol: str,
+        direction: str,
+        volume: float,
+        price: float,
+        sl: float,
+        tp: float,
+        magic: int,
+        comment: str = "",
+    ) -> OrderSendResult:
+        """Submit a ``BUY_LIMIT`` (long) or ``SELL_LIMIT`` (short) order.
+
+        Raises:
+            ValueError: ``direction`` is not ``"long"`` or ``"short"``.
+            MT5Error: ``mt5.order_send()`` returned ``None``.
+            MT5ConnectionError: client not connected.
+
+        Returns:
+            :class:`OrderSendResult` carrying the broker retcode and
+            ticket. The caller (order_manager) inspects ``retcode`` to
+            decide success vs failure — this method does not raise on
+            non-success retcodes since that is the caller's policy.
+        """
+        self._require_connected()
+        if direction == "long":
+            order_type = self._mt5.ORDER_TYPE_BUY_LIMIT
+        elif direction == "short":
+            order_type = self._mt5.ORDER_TYPE_SELL_LIMIT
+        else:
+            raise ValueError(
+                f"direction must be 'long' or 'short', got {direction!r}"
+            )
+
+        request = {
+            "action": self._mt5.TRADE_ACTION_PENDING,
+            "symbol": symbol,
+            "volume": float(volume),
+            "type": order_type,
+            "price": float(price),
+            "sl": float(sl),
+            "tp": float(tp),
+            "magic": int(magic),
+            "comment": str(comment),
+            "type_time": self._mt5.ORDER_TIME_GTC,
+            "type_filling": self._mt5.ORDER_FILLING_IOC,
+        }
+        result = self._mt5.order_send(request)
+        if result is None:
+            err = self._safe_last_error()
+            raise MT5Error(f"order_send returned None. last_error={err!r}")
+        return OrderSendResult(
+            retcode=int(getattr(result, "retcode", 0)),
+            order=int(getattr(result, "order", 0)),
+            deal=int(getattr(result, "deal", 0)),
+            comment=str(getattr(result, "comment", "")),
+            request_id=int(getattr(result, "request_id", 0)),
+        )
+
+    def cancel_pending_order(self, ticket: int) -> bool:
+        """Remove a pending limit order by ticket.
+
+        Returns ``True`` iff the broker reported ``TRADE_RETCODE_DONE``.
+        Logs and returns ``False`` on any other retcode.
+        """
+        self._require_connected()
+        request = {
+            "action": self._mt5.TRADE_ACTION_REMOVE,
+            "order": int(ticket),
+        }
+        result = self._mt5.order_send(request)
+        if result is None:
+            err = self._safe_last_error()
+            logger.error("cancel_pending_order(%d) returned None — %r", ticket, err)
+            return False
+        retcode = int(getattr(result, "retcode", 0))
+        if retcode != 10009:
+            logger.warning(
+                "cancel_pending_order(%d) retcode=%d comment=%r",
+                ticket,
+                retcode,
+                getattr(result, "comment", ""),
+            )
+            return False
+        return True
+
+    def modify_position_sl(self, *, ticket: int, new_sl: float) -> bool:
+        """Move SL on an open position. TP is preserved.
+
+        Returns ``False`` when the ticket is not open or the broker
+        rejects the modification.
+        """
+        self._require_connected()
+        positions = self._mt5.positions_get()
+        if not positions:
+            logger.warning("modify_position_sl: no positions returned by MT5")
+            return False
+        match = None
+        for p in positions:
+            if int(getattr(p, "ticket", -1)) == int(ticket):
+                match = p
+                break
+        if match is None:
+            logger.warning("modify_position_sl: ticket=%d not found among open positions", ticket)
+            return False
+        current_tp = float(getattr(match, "tp", 0.0))
+        request = {
+            "action": self._mt5.TRADE_ACTION_SLTP,
+            "position": int(ticket),
+            "symbol": str(getattr(match, "symbol", "")),
+            "sl": float(new_sl),
+            "tp": current_tp,
+        }
+        result = self._mt5.order_send(request)
+        if result is None:
+            err = self._safe_last_error()
+            logger.error("modify_position_sl(%d) returned None — %r", ticket, err)
+            return False
+        retcode = int(getattr(result, "retcode", 0))
+        if retcode != 10009:
+            logger.warning(
+                "modify_position_sl(%d) retcode=%d comment=%r",
+                ticket,
+                retcode,
+                getattr(result, "comment", ""),
+            )
+            return False
+        return True
 
     # ------------------------------------------------------------------
     # Internals
