@@ -55,6 +55,7 @@ def detect_sweeps(
     dedupe: bool = True,
     dedupe_time_window_minutes: int = 30,
     dedupe_price_tolerance_fraction: float = 0.001,
+    now_utc: datetime | None = None,
 ) -> list[Sweep]:
     """Detect every sweep that occurs inside ``killzone_window_utc``.
 
@@ -92,6 +93,15 @@ def detect_sweeps(
             forwarded to ``deduplicate_sweeps``.
         dedupe_price_tolerance_fraction: ``SWEEP_DEDUP_PRICE_TOLERANCE_FRACTION``;
             forwarded to ``deduplicate_sweeps``.
+        now_utc: optional production scheduler tick. When set, only
+            sweeps whose **return candle has closed by** ``now_utc``
+            (i.e. ``return_candle.time + M5 timeframe <= now_utc``) are
+            emitted. The dedupe pool is therefore restricted to those.
+            ``None`` (default) is the legacy unconstrained mode used by
+            tests and the pre-fix backtest harness. Without this bound
+            the dedupe pool spans the entire killzone, which leaks
+            future data into historical detections (see the look-ahead
+            audit at calibration/runs/FINAL_lookahead_audit_2026-05-01.md).
 
     Returns:
         ``list[Sweep]`` ordered by ``sweep_candle_time_utc`` ascending.
@@ -118,6 +128,14 @@ def detect_sweeps(
     times_py = [pd.Timestamp(t).to_pydatetime() for t in times]
     in_kz_arr = in_kz.to_numpy()
 
+    # Real-time bound: a sweep is only observable once its return candle
+    # has closed. Infer the M5 timeframe from candle spacing rather than
+    # hard-coding 5min so the function stays usable on any timeframe.
+    m5_timeframe: pd.Timedelta | None = None
+    if now_utc is not None and n >= 2:
+        diffs = pd.Series(times_py[1:]) - pd.Series(times_py[:-1])
+        m5_timeframe = pd.Timedelta(diffs.median())
+
     sweeps: list[Sweep] = []
 
     for i in range(n):
@@ -135,6 +153,13 @@ def detect_sweeps(
                         closes, n, i, return_window_candles, level.price, above=True
                     )
                     if return_pos is not None:
+                        return_time = times_py[return_pos]
+                        if (
+                            now_utc is not None
+                            and m5_timeframe is not None
+                            and return_time + m5_timeframe > now_utc
+                        ):
+                            continue
                         sweeps.append(
                             Sweep(
                                 direction="bullish",
@@ -143,7 +168,7 @@ def detect_sweeps(
                                 swept_level_strength=level.strength,
                                 sweep_candle_time_utc=candle_time,
                                 sweep_extreme_price=float(candle_low),
-                                return_candle_time_utc=times_py[return_pos],
+                                return_candle_time_utc=return_time,
                                 excursion=float(level.price - candle_low),
                             )
                         )
@@ -154,6 +179,13 @@ def detect_sweeps(
                         closes, n, i, return_window_candles, level.price, above=False
                     )
                     if return_pos is not None:
+                        return_time = times_py[return_pos]
+                        if (
+                            now_utc is not None
+                            and m5_timeframe is not None
+                            and return_time + m5_timeframe > now_utc
+                        ):
+                            continue
                         sweeps.append(
                             Sweep(
                                 direction="bearish",
@@ -162,7 +194,7 @@ def detect_sweeps(
                                 swept_level_strength=level.strength,
                                 sweep_candle_time_utc=candle_time,
                                 sweep_extreme_price=float(candle_high),
-                                return_candle_time_utc=times_py[return_pos],
+                                return_candle_time_utc=return_time,
                                 excursion=float(candle_high - level.price),
                             )
                         )

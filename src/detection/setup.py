@@ -346,15 +346,22 @@ def build_setup_candidates(
             settings=settings,
         )
 
+        # The sweep window is bounded by the killzone end and (when set)
+        # by ``now_utc`` so the dedupe pool only contains sweeps the
+        # production scheduler would already have observed. The
+        # `now_utc` push to ``detect_sweeps`` itself enforces the
+        # stricter "return candle has closed" rule on top of this.
+        sweep_kz_end = min(kz_end_utc, now_utc) if now_utc is not None else kz_end_utc
         sweeps = detect_sweeps(
             df_m5,
             levels,
-            killzone_window_utc=(kz_start_utc, kz_end_utc),
+            killzone_window_utc=(kz_start_utc, sweep_kz_end),
             sweep_buffer=instr_cfg["sweep_buffer"],
             return_window_candles=settings.SWEEP_RETURN_WINDOW_CANDLES,
             dedupe=True,
             dedupe_time_window_minutes=settings.SWEEP_DEDUP_TIME_WINDOW_MINUTES,
             dedupe_price_tolerance_fraction=settings.SWEEP_DEDUP_PRICE_TOLERANCE_FRACTION,
+            now_utc=now_utc,
         )
 
         # Bias-aligned only: bullish bias trades sweeps of lows; bearish
