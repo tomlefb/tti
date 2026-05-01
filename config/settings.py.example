@@ -210,11 +210,13 @@ INSTRUMENT_CONFIG = {
         "sweep_buffer": 1.0,  # 1 USD
         "equal_hl_tolerance": 0.5,  # 0.5 USD
         "sl_buffer": 1.0,  # 1 USD beyond sweep extreme
+        "typical_spread": 0.5,  # USD — Sprint 7 anomaly logging only
     },
     "NDX100": {
         "sweep_buffer": 5.0,  # 5 points
         "equal_hl_tolerance": 3.0,
         "sl_buffer": 5.0,
+        "typical_spread": 2.0,  # points — Sprint 7 anomaly logging only
     },
     "EURUSD": {
         "sweep_buffer": 0.00050,  # 5 pips
@@ -305,6 +307,63 @@ MT5_RETRY_BASE_DELAY_SECONDS = 1.0
 # max-loss-critical breach and decided to resume. The hard-stops layer
 # refuses to lift the suspension on its own — see docs/05 §"Hard stops".
 MAX_LOSS_OVERRIDE = False
+
+# -----------------------------------------------------------------------------
+# Sprint 7 — Auto-execution
+# -----------------------------------------------------------------------------
+# Sprint 7 enables auto-execution on the demo account so no setup is missed
+# during operator unavailability. The detection pipeline is unchanged; the
+# new ``src/execution/`` module places, manages, and closes orders via
+# ``mt5.order_send``. See docs/04 §"Auto-execution rules" for the full
+# rule set, docs/05 for the safety stack, and docs/03 Sprint 7 for the
+# rollout plan.
+
+# Master switch. False reverts the system to Sprint 6 notifications-only
+# behaviour. Default True on the demo account; the operator must perform
+# a separate config change to point the system at a live account.
+AUTO_TRADING_ENABLED = True
+
+# Magic number written on every order placed by the system. Identifies
+# our orders in MT5 logs and lets recovery / lifecycle filter on a
+# stable owner key.
+MAGIC_NUMBER = 7766
+
+# Optional dry-run flag — when True, place_order logs what it WOULD send
+# to MT5 without actually calling order_send. Useful on the Mac dev box
+# where the MetaTrader5 package is not installed.
+AUTO_TRADING_DRY_RUN = False
+
+# Fraction of account balance closed at TP1 when the lifecycle detects
+# the partial level was crossed. The remainder rides to TP_runner with
+# SL pulled to break-even.
+TP1_PARTIAL_FRACTION = 0.5
+
+# Optional hard ceiling on per-trade risk in USD. ``None`` = no cap;
+# RISK_PER_TRADE_FRACTION × balance is the only constraint.
+MAX_RISK_PER_TRADE_USD = None
+
+# Spread anomaly multiplier. When live spread > typical × multiplier,
+# the order_manager logs a row to ``spread_anomalies`` but DOES NOT
+# block the trade. ``typical_spread`` lives under INSTRUMENT_CONFIG
+# above; instruments without a typical_spread skip the check.
+SPREAD_ANOMALY_MULTIPLIER = 3.0
+
+# Position-lifecycle polling cadence (seconds). 30s gives a tight enough
+# loop to catch TP1 transitions without hammering MT5. The job is
+# scheduled with an ``IntervalTrigger`` and runs at all hours (cheap
+# read-only check when no positions are open).
+LIFECYCLE_CHECK_INTERVAL_SEC = 30
+
+# Path to the kill-switch file. When the file exists, place_order is
+# hard-disabled (lifecycle and end-of-killzone cleanup keep running so
+# already-open positions still close cleanly). The default is the
+# project-root ``KILL_SWITCH`` file.
+#
+# To pause auto-execution manually:
+#     touch KILL_SWITCH
+# To resume:
+#     rm KILL_SWITCH
+KILL_SWITCH_PATH = "KILL_SWITCH"
 
 # -----------------------------------------------------------------------------
 # Logging

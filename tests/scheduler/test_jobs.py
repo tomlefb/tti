@@ -555,3 +555,84 @@ def _make_test_setup(symbol: str, ts: datetime, *, kz: str, quality: str = "A") 
         quality=quality,  # type: ignore[arg-type]
         confluences=[],
     )
+
+
+# ---------------------------------------------------------------------------
+# Sprint 7 — auto-execution integration
+# ---------------------------------------------------------------------------
+
+
+def test_run_detection_cycle_calls_place_order_when_callback_provided(
+    factory, monkeypatch
+):
+    """When a place_order_callback is injected, it is called for each
+    A/A+ setup that was notified."""
+    settings = _settings(AUTO_TRADING_ENABLED=True)
+    now_utc = datetime(2026, 4, 28, 14, 0, tzinfo=UTC)
+    mt5 = _MockMt5()
+    notifier = _make_notifier()
+
+    setup_a = _make_test_setup(
+        "XAUUSD", datetime(2026, 4, 28, 14, 0, tzinfo=UTC), kz="ny", quality="A"
+    )
+    setup_b = _make_test_setup(
+        "XAUUSD", datetime(2026, 4, 28, 14, 5, tzinfo=UTC), kz="ny", quality="B"
+    )
+
+    def fake_build(*args, **kwargs):
+        if kwargs.get("symbol") == "XAUUSD":
+            return [setup_a, setup_b], []
+        return [], []
+
+    monkeypatch.setattr(jobs_module, "build_setup_candidates", fake_build)
+
+    placed: list[Setup] = []
+
+    def place_order_cb(setup):
+        placed.append(setup)
+
+    run_detection_cycle(
+        mt5,
+        factory,
+        notifier,
+        settings,
+        now_utc=now_utc,
+        chart_send_callback=lambda s, p: None,
+        place_order_callback=place_order_cb,
+    )
+
+    # B-grade is filtered out at notification gate → not auto-executed.
+    assert len(placed) == 1
+    assert placed[0].quality == "A"
+
+
+def test_run_detection_cycle_does_not_call_place_order_when_callback_absent(
+    factory, monkeypatch
+):
+    """No callback wired = manual mode (Sprint 6 behaviour preserved)."""
+    settings = _settings(AUTO_TRADING_ENABLED=True)
+    now_utc = datetime(2026, 4, 28, 14, 0, tzinfo=UTC)
+    mt5 = _MockMt5()
+    notifier = _make_notifier()
+
+    setup_a = _make_test_setup(
+        "XAUUSD", datetime(2026, 4, 28, 14, 0, tzinfo=UTC), kz="ny", quality="A"
+    )
+
+    def fake_build(*args, **kwargs):
+        if kwargs.get("symbol") == "XAUUSD":
+            return [setup_a], []
+        return [], []
+
+    monkeypatch.setattr(jobs_module, "build_setup_candidates", fake_build)
+
+    # No place_order_callback — must not raise.
+    report = run_detection_cycle(
+        mt5,
+        factory,
+        notifier,
+        settings,
+        now_utc=now_utc,
+        chart_send_callback=lambda s, p: None,
+    )
+    assert report.setups_notified == 1

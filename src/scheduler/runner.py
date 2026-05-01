@@ -30,6 +30,12 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from src.execution.order_manager import place_order
+from src.execution.position_lifecycle import (
+    check_open_positions,
+    end_of_killzone_cleanup,
+)
+from src.execution.recovery import reconcile_orphan_positions
 from src.journal.db import get_engine, init_db, session_scope
 from src.journal.repository import get_decision, get_setup, insert_decision
 from src.mt5_client.client import MT5Client
@@ -123,7 +129,23 @@ async def _amain(settings: ModuleType) -> None:
         on_callback=_build_journal_callback(engine, settings),
     )
     await notifier.start_polling()
-    await notifier.send_text("✅ TJR scheduler started — paper-trading mode.")
+
+    auto_trading = bool(getattr(settings, "AUTO_TRADING_ENABLED", False))
+    mode_label = "auto-execution (demo)" if auto_trading else "notifications-only"
+    await notifier.send_text(f"✅ TJR scheduler started — {mode_label}.")
+
+    # Sprint 7: orphan / lost-order reconciliation on startup. Idempotent
+    # so a crash-restart loop does not amplify side effects.
+    try:
+        reconcile_orphan_positions(
+            mt5_client=mt5,
+            journal_session_factory=session_factory,
+            settings=settings,
+            now_utc=datetime.now(UTC),
+            notifier=notifier,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("startup reconciliation raised — proceeding anyway")
 
     # Scheduler
     scheduler = AsyncIOScheduler(timezone=_TZ_PARIS)
@@ -133,9 +155,35 @@ async def _amain(settings: ModuleType) -> None:
     london_kz = settings.KILLZONE_LONDON
     ny_kz = settings.KILLZONE_NY
 
+    def _place_order_callback(setup):
+        """Sprint 7 — invoke order_manager.place_order with proper deps.
+
+        Wrapped here (rather than passed as a partial) so the inline
+        try/except keeps execution failures from killing the cycle.
+        """
+        try:
+            place_order(
+                setup=setup,
+                mt5_client=mt5,
+                journal_session_factory=session_factory,
+                settings=settings,
+                now_utc=datetime.now(UTC),
+                notifier=notifier,
+                dry_run=bool(getattr(settings, "AUTO_TRADING_DRY_RUN", False)),
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("place_order failed for %s — continuing cycle", setup.symbol)
+
     def cycle_job():
         try:
-            run_detection_cycle(mt5, session_factory, notifier, settings, now_utc=datetime.now(UTC))
+            run_detection_cycle(
+                mt5,
+                session_factory,
+                notifier,
+                settings,
+                now_utc=datetime.now(UTC),
+                place_order_callback=_place_order_callback if auto_trading else None,
+            )
         except Exception as exc:  # noqa: BLE001 — survive bad cycles
             logger.exception("cycle_job uncaught error")
             asyncio.ensure_future(notifier.send_error(f"⚠️ scheduler error: {exc!r}"))
@@ -254,6 +302,84 @@ async def _amain(settings: ModuleType) -> None:
         id="outcome_reconciliation",
         replace_existing=True,
     )
+
+    # Sprint 7: position lifecycle polling (every N seconds, all hours).
+    # Cheap operation — at most a handful of MT5 reads per call.
+    if auto_trading:
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        lifecycle_interval = int(
+            getattr(settings, "LIFECYCLE_CHECK_INTERVAL_SEC", 30)
+        )
+
+        def lifecycle_job():
+            try:
+                check_open_positions(
+                    mt5_client=mt5,
+                    journal_session_factory=session_factory,
+                    settings=settings,
+                    now_utc=datetime.now(UTC),
+                    notifier=notifier,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("lifecycle_job uncaught error")
+
+        scheduler.add_job(
+            lifecycle_job,
+            IntervalTrigger(seconds=lifecycle_interval),
+            id="position_lifecycle",
+            replace_existing=True,
+        )
+
+        # End-of-killzone cleanup — cancel pending limits at killzone close.
+        def london_cleanup():
+            try:
+                end_of_killzone_cleanup(
+                    mt5_client=mt5,
+                    journal_session_factory=session_factory,
+                    settings=settings,
+                    killzone="london",
+                    now_utc=datetime.now(UTC),
+                    notifier=notifier,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("london_cleanup uncaught error")
+
+        def ny_cleanup():
+            try:
+                end_of_killzone_cleanup(
+                    mt5_client=mt5,
+                    journal_session_factory=session_factory,
+                    settings=settings,
+                    killzone="ny",
+                    now_utc=datetime.now(UTC),
+                    notifier=notifier,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("ny_cleanup uncaught error")
+
+        scheduler.add_job(
+            london_cleanup,
+            CronTrigger(
+                day_of_week="mon-fri",
+                hour=london_kz[2],
+                minute=london_kz[3],
+                timezone=_TZ_PARIS,
+            ),
+            id="london_killzone_end_cleanup",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            ny_cleanup,
+            CronTrigger(
+                day_of_week="mon-fri",
+                hour=ny_kz[2],
+                minute=ny_kz[3],
+                timezone=_TZ_PARIS,
+            ),
+            id="ny_killzone_end_cleanup",
+            replace_existing=True,
+        )
 
     scheduler.start()
     logger.info(

@@ -57,3 +57,10 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# --- Extended Databento fixtures (large, regenerated locally) ---
+tests/fixtures/historical_extended/raw/
+tests/fixtures/historical_extended/processed/
+
+# Sprint 7 — auto-execution kill switch (operator-managed; not versioned)
+KILL_SWITCH

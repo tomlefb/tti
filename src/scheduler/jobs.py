@@ -109,6 +109,7 @@ def run_detection_cycle(
     *,
     now_utc: datetime,
     chart_send_callback: Callable | None = None,
+    place_order_callback: Callable | None = None,
 ) -> CycleReport:
     """Run one detection cycle for every watched pair.
 
@@ -207,6 +208,22 @@ def run_detection_cycle(
                 )
                 if ok:
                     report.setups_notified += 1
+                # Sprint 7: auto-execution. The callback (wired in
+                # ``runner.py``) handles its own pre-flight via
+                # ``safe_guards.check_pre_trade``, so the cycle does
+                # not pre-gate here. Failures are logged inside the
+                # callback and never crash the cycle.
+                if (
+                    place_order_callback is not None
+                    and getattr(settings, "AUTO_TRADING_ENABLED", False)
+                ):
+                    try:
+                        place_order_callback(setup)
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "place_order_callback raised for %s — continuing",
+                            setup.symbol,
+                        )
 
         except MT5Error as exc:
             logger.error("MT5 error processing %s: %r", pair, exc, exc_info=True)
