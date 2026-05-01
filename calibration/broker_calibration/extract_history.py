@@ -540,7 +540,9 @@ def main() -> int:  # pragma: no cover — entrypoint, exercised manually
             "trades": [t.__dict__ for t in trades],
             "symbol_specs": symbol_specs,
         }
-        RAW_HISTORY_PATH.write_text(json.dumps(raw_payload, indent=2, default=str))
+        RAW_HISTORY_PATH.write_text(
+            json.dumps(raw_payload, indent=2, default=str), encoding="utf-8"
+        )
         logger.info("Wrote raw dump: %s", RAW_HISTORY_PATH)
 
         aggregated = aggregate_by_symbol(trades)
@@ -552,7 +554,7 @@ def main() -> int:  # pragma: no cover — entrypoint, exercised manually
             n_total_trades=len(trades),
             account_currency=currency,
         )
-        REPORT_PATH.write_text(report)
+        REPORT_PATH.write_text(report, encoding="utf-8")
         logger.info("Wrote report: %s", REPORT_PATH)
 
         # Console summary
