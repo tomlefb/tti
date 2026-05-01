@@ -476,6 +476,38 @@ def test_filled_position_closed_at_tp_runner_marks_status(engine, session_factor
         assert order.realized_r == pytest.approx(125.0 / 75.0, abs=0.01)
 
 
+def test_tp1_hit_position_runs_to_tp_runner_eventually(engine, session_factory):
+    """Regression test for the smoke-test bug: after status="tp1_hit",
+    the remaining half rides until TP_runner. The lifecycle MUST keep
+    polling tp1_hit orders so the runner-exit reconciliation fires when
+    the position vanishes from MT5."""
+    with session_scope(engine) as s:
+        _add_setup_and_order(s, ticket=700, status="tp1_hit", volume=0.05)
+
+    mt5 = _MockMt5(
+        positions=[],  # vanished — runner exit
+        symbol_info_by_symbol={"XAUUSD": _SymbolInfo(trade_contract_size=100.0)},
+    )
+    mt5.history[700] = dict(
+        exit_price=4080.0,
+        exit_time_utc=_now(),
+        profit_usd=125.0,
+    )
+
+    report = check_open_positions(
+        mt5_client=mt5,
+        journal_session_factory=session_factory,
+        settings=_settings(),
+        now_utc=_now(),
+        notifier=None,
+    )
+
+    assert report.tp_runner_hit == 1
+    with session_scope(engine) as s:
+        order = get_order_by_ticket(s, 700)
+        assert order.status == "tp_runner_hit"
+
+
 def test_filled_position_closed_at_sl_marks_status(engine, session_factory):
     """At SL, full position closes at -1R. profit_usd = -$75 on $75 risk."""
     with session_scope(engine) as s:

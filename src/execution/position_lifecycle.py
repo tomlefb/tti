@@ -93,8 +93,11 @@ def check_open_positions(
     positions_by_ticket = {int(p.ticket): p for p in mt5_positions}
 
     with journal_session_factory() as s:
+        # Include ``tp1_hit`` so the runner-exit / BE-stop reconciliation
+        # fires when the remaining half of a partially-closed position
+        # finally closes on MT5.
         journal_orders = list_open_orders_with_status(
-            s, statuses=["pending", "filled"]
+            s, statuses=["pending", "filled", "tp1_hit"]
         )
 
     for order in journal_orders:
@@ -121,6 +124,19 @@ def check_open_positions(
                     notifier,
                     report,
                 )
+            elif order.status == "tp1_hit":
+                # After TP1 partial close, the remaining half rides until
+                # TP_runner OR the BE-stop. Reconcile when the position
+                # vanishes from MT5.
+                if order.mt5_ticket not in positions_by_ticket:
+                    _reconcile_closed_position(
+                        order,
+                        mt5_client,
+                        journal_session_factory,
+                        now_utc,
+                        notifier,
+                        report,
+                    )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
                 "lifecycle error for ticket=%d status=%s",
