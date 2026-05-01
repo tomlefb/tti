@@ -64,3 +64,8 @@ tests/fixtures/historical_extended/processed/
 
 # Sprint 7 — auto-execution kill switch (operator-managed; not versioned)
 KILL_SWITCH
+
+# Broker calibration: account-specific data, never commit
+calibration/broker_calibration/raw_history.json
+calibration/broker_calibration/spread_log_*.parquet
+calibration/broker_calibration/spread_log_*.csv
