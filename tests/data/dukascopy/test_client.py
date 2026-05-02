@@ -15,7 +15,13 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from src.data.dukascopy.client import (
+# `src.data.dukascopy.client` imports `dukascopy_python` at module load,
+# so any import from that package fails on hosts where the library is
+# not installed (notably the Windows runtime host, where Dukascopy is
+# not used). Skip the whole module with a clear message in that case.
+pytest.importorskip("dukascopy_python")
+
+from src.data.dukascopy.client import (  # noqa: E402
     CANONICAL_COLUMNS,
     DukascopyClient,
     _months_between,

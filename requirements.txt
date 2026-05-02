@@ -34,6 +34,10 @@ streamlit>=1.30
 # Parquet I/O — used for historical OHLC fixtures and any future columnar storage
 pyarrow>=15.0
 
+# Dukascopy historical data (Mac-side calibration cross-checks).
+# Pinned because the upstream API has shifted between minor versions.
+dukascopy_python==4.0.1
+
 # Testing
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
