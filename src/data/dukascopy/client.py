@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
@@ -235,11 +235,11 @@ class DukascopyClient:
         month: int,
         side: str,
     ) -> pd.DataFrame:
-        month_start = datetime(year, month, 1, tzinfo=timezone.utc)
+        month_start = datetime(year, month, 1, tzinfo=UTC)
         if month == 12:
-            month_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+            month_end = datetime(year + 1, 1, 1, tzinfo=UTC)
         else:
-            month_end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+            month_end = datetime(year, month + 1, 1, tzinfo=UTC)
         return self._fetch_from_network(code, month_start, month_end, side)
 
     def _cache_path(
@@ -289,8 +289,8 @@ class DukascopyClient:
 def _ensure_utc(dt: datetime) -> datetime:
     """Return ``dt`` as a tz-aware UTC datetime (naive => UTC)."""
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
 
 
 def _empty_frame() -> pd.DataFrame:

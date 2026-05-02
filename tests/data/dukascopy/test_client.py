@@ -8,7 +8,7 @@ runs (``pytest -m "not network"``).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,14 +17,12 @@ import pytest
 
 from src.data.dukascopy.client import (
     CANONICAL_COLUMNS,
-    INSTRUMENT_MAPPING,
     DukascopyClient,
     _months_between,
     canonical_instruments,
     from_dukascopy_code,
     to_dukascopy_code,
 )
-
 
 # ---------------------------------------------------------------------- #
 # Helpers
@@ -40,7 +38,7 @@ def _make_fake_df(start: datetime, n_bars: int) -> pd.DataFrame:
             index=idx,
         )
     if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
+        start = start.replace(tzinfo=UTC)
     idx = pd.date_range(start, periods=n_bars, freq="5min", tz="UTC")
     return pd.DataFrame(
         {
@@ -104,8 +102,8 @@ class TestArgumentValidation:
         with pytest.raises(ValueError, match="start must be < end"):
             client.fetch_m5(
                 "XAUUSD",
-                start=datetime(2024, 6, 14, tzinfo=timezone.utc),
-                end=datetime(2024, 6, 14, tzinfo=timezone.utc),
+                start=datetime(2024, 6, 14, tzinfo=UTC),
+                end=datetime(2024, 6, 14, tzinfo=UTC),
             )
 
     def test_invalid_side_raises(self, tmp_path: Path):
@@ -113,8 +111,8 @@ class TestArgumentValidation:
         with pytest.raises(ValueError, match="side must be 'bid' or 'ask'"):
             client.fetch_m5(
                 "XAUUSD",
-                start=datetime(2024, 6, 14, tzinfo=timezone.utc),
-                end=datetime(2024, 6, 15, tzinfo=timezone.utc),
+                start=datetime(2024, 6, 14, tzinfo=UTC),
+                end=datetime(2024, 6, 15, tzinfo=UTC),
                 side="mid",  # type: ignore[arg-type]
             )
 
@@ -123,8 +121,8 @@ class TestArgumentValidation:
         with pytest.raises(ValueError, match="Unknown instrument"):
             client.fetch_m5(
                 "BANANA",
-                start=datetime(2024, 6, 14, tzinfo=timezone.utc),
-                end=datetime(2024, 6, 15, tzinfo=timezone.utc),
+                start=datetime(2024, 6, 14, tzinfo=UTC),
+                end=datetime(2024, 6, 15, tzinfo=UTC),
             )
 
 
@@ -138,7 +136,7 @@ class TestFetchFormat:
         client = DukascopyClient(cache_dir=tmp_path)
         # 600 bars covering the requested 2-day window
         fake = _make_fake_df(
-            datetime(2024, 6, 14, tzinfo=timezone.utc), n_bars=600
+            datetime(2024, 6, 14, tzinfo=UTC), n_bars=600
         )
         with patch(
             "src.data.dukascopy.client.duka.fetch",
@@ -146,8 +144,8 @@ class TestFetchFormat:
         ) as mock_fetch:
             df = client.fetch_m5(
                 "XAUUSD",
-                start=datetime(2024, 6, 14, tzinfo=timezone.utc),
-                end=datetime(2024, 6, 16, tzinfo=timezone.utc),
+                start=datetime(2024, 6, 14, tzinfo=UTC),
+                end=datetime(2024, 6, 16, tzinfo=UTC),
                 use_cache=False,
             )
             assert mock_fetch.called
@@ -160,10 +158,10 @@ class TestFetchFormat:
         client = DukascopyClient(cache_dir=tmp_path)
         # 5 days of M5 starting Sunday — lib often returns Sunday rollover
         fake = _make_fake_df(
-            datetime(2024, 6, 9, 22, tzinfo=timezone.utc), n_bars=2000
+            datetime(2024, 6, 9, 22, tzinfo=UTC), n_bars=2000
         )
-        start = datetime(2024, 6, 10, tzinfo=timezone.utc)
-        end = datetime(2024, 6, 11, tzinfo=timezone.utc)
+        start = datetime(2024, 6, 10, tzinfo=UTC)
+        end = datetime(2024, 6, 11, tzinfo=UTC)
         with patch(
             "src.data.dukascopy.client.duka.fetch", return_value=fake
         ):
@@ -198,8 +196,8 @@ class TestFetchFormat:
         ):
             df = client.fetch_m5(
                 "EURUSD",
-                start=datetime(2010, 1, 1, tzinfo=timezone.utc),
-                end=datetime(2010, 1, 8, tzinfo=timezone.utc),
+                start=datetime(2010, 1, 1, tzinfo=UTC),
+                end=datetime(2010, 1, 8, tzinfo=UTC),
                 use_cache=False,
             )
         assert list(df.columns) == CANONICAL_COLUMNS
@@ -217,11 +215,11 @@ class TestCache:
         client = DukascopyClient(cache_dir=tmp_path)
         # one full month of bars (every 5 min for June 2024 ≈ 8640)
         fake_month = _make_fake_df(
-            datetime(2024, 6, 1, tzinfo=timezone.utc), n_bars=8640
+            datetime(2024, 6, 1, tzinfo=UTC), n_bars=8640
         )
 
-        start = datetime(2024, 6, 14, tzinfo=timezone.utc)
-        end = datetime(2024, 6, 15, tzinfo=timezone.utc)
+        start = datetime(2024, 6, 14, tzinfo=UTC)
+        end = datetime(2024, 6, 15, tzinfo=UTC)
         with patch(
             "src.data.dukascopy.client.duka.fetch", return_value=fake_month
         ) as mock_first:
@@ -247,53 +245,53 @@ class TestCache:
         client = DukascopyClient(cache_dir=tmp_path)
         # First populate June only.
         june_fake = _make_fake_df(
-            datetime(2024, 6, 1, tzinfo=timezone.utc), n_bars=8640
+            datetime(2024, 6, 1, tzinfo=UTC), n_bars=8640
         )
         with patch(
             "src.data.dukascopy.client.duka.fetch", return_value=june_fake
         ):
             client.fetch_m5(
                 "EURUSD",
-                start=datetime(2024, 6, 14, tzinfo=timezone.utc),
-                end=datetime(2024, 6, 18, tzinfo=timezone.utc),
+                start=datetime(2024, 6, 14, tzinfo=UTC),
+                end=datetime(2024, 6, 18, tzinfo=UTC),
             )
 
         # Now request a window spanning May (missing) -> June (cached).
         # Only May's month-call should hit the network.
         may_fake = _make_fake_df(
-            datetime(2024, 5, 1, tzinfo=timezone.utc), n_bars=8640
+            datetime(2024, 5, 1, tzinfo=UTC), n_bars=8640
         )
         with patch(
             "src.data.dukascopy.client.duka.fetch", return_value=may_fake
         ) as mock_fetch:
             df = client.fetch_m5(
                 "EURUSD",
-                start=datetime(2024, 5, 28, tzinfo=timezone.utc),
-                end=datetime(2024, 6, 5, tzinfo=timezone.utc),
+                start=datetime(2024, 5, 28, tzinfo=UTC),
+                end=datetime(2024, 6, 5, tzinfo=UTC),
             )
             assert mock_fetch.call_count == 1
             kwargs = mock_fetch.call_args.kwargs
             # The single call should be the May-2024 month boundary.
-            assert kwargs["start"] == datetime(2024, 5, 1, tzinfo=timezone.utc)
-            assert kwargs["end"] == datetime(2024, 6, 1, tzinfo=timezone.utc)
+            assert kwargs["start"] == datetime(2024, 5, 1, tzinfo=UTC)
+            assert kwargs["end"] == datetime(2024, 6, 1, tzinfo=UTC)
 
         assert len(df) > 0
         # both halves represented in the result
-        assert df.index.min() >= datetime(2024, 5, 28, tzinfo=timezone.utc)
-        assert df.index.max() < datetime(2024, 6, 5, tzinfo=timezone.utc)
+        assert df.index.min() >= datetime(2024, 5, 28, tzinfo=UTC)
+        assert df.index.max() < datetime(2024, 6, 5, tzinfo=UTC)
 
     def test_use_cache_false_bypasses_cache_completely(self, tmp_path: Path):
         client = DukascopyClient(cache_dir=tmp_path)
         fake = _make_fake_df(
-            datetime(2024, 6, 14, tzinfo=timezone.utc), n_bars=288
+            datetime(2024, 6, 14, tzinfo=UTC), n_bars=288
         )
         with patch(
             "src.data.dukascopy.client.duka.fetch", return_value=fake
         ) as mock_first:
             client.fetch_m5(
                 "XAUUSD",
-                start=datetime(2024, 6, 14, tzinfo=timezone.utc),
-                end=datetime(2024, 6, 15, tzinfo=timezone.utc),
+                start=datetime(2024, 6, 14, tzinfo=UTC),
+                end=datetime(2024, 6, 15, tzinfo=UTC),
                 use_cache=False,
             )
             assert mock_first.call_count == 1
@@ -302,8 +300,8 @@ class TestCache:
         ) as mock_second:
             client.fetch_m5(
                 "XAUUSD",
-                start=datetime(2024, 6, 14, tzinfo=timezone.utc),
-                end=datetime(2024, 6, 15, tzinfo=timezone.utc),
+                start=datetime(2024, 6, 14, tzinfo=UTC),
+                end=datetime(2024, 6, 15, tzinfo=UTC),
                 use_cache=False,
             )
             assert mock_second.call_count == 1
@@ -313,15 +311,15 @@ class TestCache:
     def test_cache_dir_none_disables_cache(self, tmp_path: Path):
         client = DukascopyClient(cache_dir=None)
         fake = _make_fake_df(
-            datetime(2024, 6, 14, tzinfo=timezone.utc), n_bars=288
+            datetime(2024, 6, 14, tzinfo=UTC), n_bars=288
         )
         with patch(
             "src.data.dukascopy.client.duka.fetch", return_value=fake
         ) as mock_fetch:
             client.fetch_m5(
                 "XAUUSD",
-                start=datetime(2024, 6, 14, tzinfo=timezone.utc),
-                end=datetime(2024, 6, 15, tzinfo=timezone.utc),
+                start=datetime(2024, 6, 14, tzinfo=UTC),
+                end=datetime(2024, 6, 15, tzinfo=UTC),
             )
             assert mock_fetch.call_count == 1
 
@@ -334,27 +332,27 @@ class TestCache:
 class TestMonthsBetween:
     def test_single_month(self):
         assert _months_between(
-            datetime(2024, 6, 14, tzinfo=timezone.utc),
-            datetime(2024, 6, 18, tzinfo=timezone.utc),
+            datetime(2024, 6, 14, tzinfo=UTC),
+            datetime(2024, 6, 18, tzinfo=UTC),
         ) == [(2024, 6)]
 
     def test_spans_two_months(self):
         assert _months_between(
-            datetime(2024, 5, 28, tzinfo=timezone.utc),
-            datetime(2024, 6, 5, tzinfo=timezone.utc),
+            datetime(2024, 5, 28, tzinfo=UTC),
+            datetime(2024, 6, 5, tzinfo=UTC),
         ) == [(2024, 5), (2024, 6)]
 
     def test_year_boundary(self):
         assert _months_between(
-            datetime(2024, 12, 28, tzinfo=timezone.utc),
-            datetime(2025, 1, 5, tzinfo=timezone.utc),
+            datetime(2024, 12, 28, tzinfo=UTC),
+            datetime(2025, 1, 5, tzinfo=UTC),
         ) == [(2024, 12), (2025, 1)]
 
     def test_end_at_month_boundary_excludes_that_month(self):
         # [2024-05-15, 2024-06-01) covers only May.
         assert _months_between(
-            datetime(2024, 5, 15, tzinfo=timezone.utc),
-            datetime(2024, 6, 1, tzinfo=timezone.utc),
+            datetime(2024, 5, 15, tzinfo=UTC),
+            datetime(2024, 6, 1, tzinfo=UTC),
         ) == [(2024, 5)]
 
 
@@ -369,8 +367,8 @@ class TestNetwork:
         client = DukascopyClient(cache_dir=tmp_path)
         df = client.fetch_m5(
             "XAUUSD",
-            start=datetime(2026, 4, 21, tzinfo=timezone.utc),
-            end=datetime(2026, 4, 23, tzinfo=timezone.utc),
+            start=datetime(2026, 4, 21, tzinfo=UTC),
+            end=datetime(2026, 4, 23, tzinfo=UTC),
         )
         assert len(df) > 0
         assert list(df.columns) == CANONICAL_COLUMNS
@@ -381,8 +379,8 @@ class TestNetwork:
         client = DukascopyClient(cache_dir=tmp_path)
         df = client.fetch_m5(
             "EURUSD",
-            start=datetime(2010, 6, 14, tzinfo=timezone.utc),
-            end=datetime(2010, 6, 19, tzinfo=timezone.utc),
+            start=datetime(2010, 6, 14, tzinfo=UTC),
+            end=datetime(2010, 6, 19, tzinfo=UTC),
         )
         assert len(df) == 0
         assert list(df.columns) == CANONICAL_COLUMNS
