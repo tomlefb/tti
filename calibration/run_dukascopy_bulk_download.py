@@ -21,10 +21,14 @@ import argparse
 import logging
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from src.data.dukascopy import DukascopyClient, canonical_instruments
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from src.data.dukascopy import DukascopyClient, canonical_instruments  # noqa: E402
 
 # Earliest M5 month available per instrument (from the coverage probe).
 INSTRUMENT_START: dict[str, tuple[int, int]] = {
@@ -252,6 +256,160 @@ def write_report(
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
+# ---------------------------------------------------------------------- #
+# Post-download validation
+# ---------------------------------------------------------------------- #
+
+
+GAP_THRESHOLD = timedelta(days=7)
+MAX_GAPS_REPORTED = 10
+
+
+def validate_cache(
+    instruments: list[str], logger: logging.Logger
+) -> dict[str, dict]:
+    """Walk each cached instrument and surface anomalies.
+
+    Anomalies are reported, not corrected: they may originate from
+    Dukascopy itself (mid-day data revisions, exchange holidays, etc.)
+    and require operator judgment to act on.
+    """
+    client = DukascopyClient()
+    end_month = _last_complete_month()
+    if end_month[1] == 12:
+        end_dt = datetime(end_month[0] + 1, 1, 1, tzinfo=UTC)
+    else:
+        end_dt = datetime(end_month[0], end_month[1] + 1, 1, tzinfo=UTC)
+
+    results: dict[str, dict] = {}
+    for instrument in instruments:
+        start = INSTRUMENT_START[instrument]
+        start_dt = datetime(start[0], start[1], 1, tzinfo=UTC)
+        logger.info(
+            "validate %s: %s -> %s",
+            instrument, start_dt.date(), end_dt.date(),
+        )
+
+        df = client.fetch_m5(
+            instrument, start_dt, end_dt, side=SIDE, use_cache=True
+        )
+        n = len(df)
+        issues: list[str] = []
+        first_ts = str(df.index[0]) if n else None
+        last_ts = str(df.index[-1]) if n else None
+        n_dupes = 0
+        n_gaps = 0
+        biggest_gaps: list[tuple[str, str]] = []
+        n_bad_hilo = 0
+        n_bad_high = 0
+        n_bad_low = 0
+
+        if n == 0:
+            issues.append("no data in cache")
+        else:
+            if not df.index.is_monotonic_increasing:
+                issues.append("index not monotonic increasing")
+            n_dupes = int(df.index.duplicated().sum())
+            if n_dupes > 0:
+                issues.append(f"{n_dupes} duplicated timestamps")
+            diffs = df.index.to_series().diff().dropna()
+            big = diffs[diffs > GAP_THRESHOLD]
+            n_gaps = len(big)
+            if n_gaps > 0:
+                top = big.sort_values(ascending=False).head(MAX_GAPS_REPORTED)
+                biggest_gaps = [(str(ts), str(gap)) for ts, gap in top.items()]
+                issues.append(
+                    f"{n_gaps} gap(s) > 7 days "
+                    f"(reporting top {min(n_gaps, MAX_GAPS_REPORTED)})"
+                )
+            # OHLC sanity
+            n_bad_hilo = int((df["high"] < df["low"]).sum())
+            if n_bad_hilo > 0:
+                issues.append(f"{n_bad_hilo} rows with high < low")
+            high_max_oc = df[["open", "close"]].max(axis=1)
+            n_bad_high = int((df["high"] < high_max_oc).sum())
+            if n_bad_high > 0:
+                issues.append(
+                    f"{n_bad_high} rows with high < max(open, close)"
+                )
+            low_min_oc = df[["open", "close"]].min(axis=1)
+            n_bad_low = int((df["low"] > low_min_oc).sum())
+            if n_bad_low > 0:
+                issues.append(
+                    f"{n_bad_low} rows with low > min(open, close)"
+                )
+
+        results[instrument] = {
+            "bars": n,
+            "first": first_ts,
+            "last": last_ts,
+            "issues": issues,
+            "n_dupes": n_dupes,
+            "n_gaps_gt_7d": n_gaps,
+            "biggest_gaps": biggest_gaps,
+            "n_bad_hilo": n_bad_hilo,
+            "n_bad_high": n_bad_high,
+            "n_bad_low": n_bad_low,
+        }
+        logger.info(
+            "%s validated: %d bars, %d issue(s) (%s)",
+            instrument, n, len(issues),
+            "OK" if not issues else "see report",
+        )
+
+    return results
+
+
+def write_validation_report(
+    results: dict, validation_report_path: Path
+) -> None:
+    lines: list[str] = []
+    lines.append(
+        f"# Dukascopy cache validation — {datetime.now(UTC).isoformat()}"
+    )
+    lines.append("")
+    lines.append("## Summary")
+    lines.append("")
+    lines.append(
+        "| Instrument | Bars | First | Last | Dupes | Gaps>7d | "
+        "high<low | high<max(o,c) | low>min(o,c) |"
+    )
+    lines.append("|---|---|---|---|---|---|---|---|---|")
+    for inst, r in results.items():
+        lines.append(
+            f"| {inst} | {r['bars']:,} | {r['first']} | {r['last']} | "
+            f"{r['n_dupes']} | {r['n_gaps_gt_7d']} | "
+            f"{r['n_bad_hilo']} | {r['n_bad_high']} | {r['n_bad_low']} |"
+        )
+    lines.append("")
+
+    has_anomalies = any(r["issues"] for r in results.values())
+    if not has_anomalies:
+        lines.append("All instruments pass without anomaly.")
+        lines.append("")
+    else:
+        lines.append("## Anomalies")
+        lines.append("")
+        for inst, r in results.items():
+            if not r["issues"]:
+                continue
+            lines.append(f"### {inst}")
+            lines.append("")
+            for issue in r["issues"]:
+                lines.append(f"- {issue}")
+            if r["biggest_gaps"]:
+                lines.append("")
+                lines.append("Biggest gaps:")
+                lines.append("")
+                lines.append("| Gap ends at | Duration |")
+                lines.append("|---|---|")
+                for ts, dur in r["biggest_gaps"]:
+                    lines.append(f"| {ts} | {dur} |")
+            lines.append("")
+
+    validation_report_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def _setup_logger(log_path: Path) -> logging.Logger:
     logger = logging.getLogger("dukascopy_bulk")
     logger.setLevel(logging.INFO)
@@ -286,7 +444,24 @@ def main() -> int:
         default=None,
         help="Path to write the markdown report (default: alongside the log).",
     )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Skip download; only validate the existing cache.",
+    )
+    parser.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Run download only; do not validate the cache afterwards.",
+    )
     args = parser.parse_args()
+
+    if args.validate_only and args.skip_validation:
+        print(
+            "--validate-only and --skip-validation are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 2
 
     requested = [
         s.strip().upper() for s in args.instruments.split(",") if s.strip()
@@ -314,13 +489,27 @@ def main() -> int:
     )
 
     logger = _setup_logger(log_path)
-    logger.info("Bulk download started: instruments=%s", requested)
-    summary, overall_elapsed = run_bulk_download(requested, logger)
-    logger.info("Done in %.1fs (%.1f min)", overall_elapsed, overall_elapsed / 60)
 
-    write_report(summary, overall_elapsed, report_path)
-    logger.info("Report: %s", report_path)
-    logger.info("Log:    %s", log_path)
+    if not args.validate_only:
+        logger.info("Bulk download started: instruments=%s", requested)
+        summary, overall_elapsed = run_bulk_download(requested, logger)
+        logger.info(
+            "Download done in %.1fs (%.1f min)",
+            overall_elapsed, overall_elapsed / 60,
+        )
+        write_report(summary, overall_elapsed, report_path)
+        logger.info("Download report: %s", report_path)
+
+    if not args.skip_validation:
+        logger.info("Validation started: instruments=%s", requested)
+        results = validate_cache(requested, logger)
+        validation_report_path = report_path.with_name(
+            report_path.stem + "_validation.md"
+        )
+        write_validation_report(results, validation_report_path)
+        logger.info("Validation report: %s", validation_report_path)
+
+    logger.info("Log: %s", log_path)
     return 0
 
 
