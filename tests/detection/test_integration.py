@@ -70,18 +70,20 @@ def test_find_swings_runs_on_fixtures(symbol: str, tf: str, lookback: int) -> No
 
     sig = swings[swings["swing_type"].notna()]
 
-    # 2. Plausible swing count for ~6-12 months of H1/H4 data.
-    # H4 fixtures are ~1500 candles; H1 are ~6000. The amplitude filter at
-    # ATR×0.5 with lookback=2 typically keeps a few percent of bars; bands
-    # are wide on purpose — this is a regression guard, not a precision test.
+    # 2. Plausible swing count, scaled to fixture depth.
+    # The amplitude filter at ATR×0.5 with lookback=2 keeps roughly
+    # 25-30% of bars on H1/H4 of the validated portfolio (XAU/NDX/
+    # EUR/GBP). Bounds are parametric so the test stays valid across
+    # fixture re-exports of any depth — this is a regression guard,
+    # not a precision test. Tighten after Sprint 1 calibration.
     n_sig = len(sig)
-    # Bands are wide on purpose: defaults (lookback=2, ATR_mult=0.5) are
-    # uncalibrated and the operator will tune them. Tighten after Sprint 1
-    # calibration produces validated values.
-    if tf == "H4":
-        assert 5 <= n_sig <= 600, f"{symbol} {tf}: {n_sig} swings outside [5, 600]"
-    else:  # H1
-        assert 20 <= n_sig <= 2000, f"{symbol} {tf}: {n_sig} swings outside [20, 2000]"
+    n_bars = len(df)
+    min_swings = max(5, n_bars // 200)
+    max_swings = n_bars // 3
+    assert min_swings <= n_sig <= max_swings, (
+        f"{symbol} {tf}: {n_sig} swings outside [{min_swings}, {max_swings}] "
+        f"on {n_bars} bars"
+    )
 
     # 3. All swing rows fall inside the fixture's time range.
     times = df.loc[sig.index, "time"]
