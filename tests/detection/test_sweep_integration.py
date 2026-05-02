@@ -71,6 +71,14 @@ _REFERENCE_CHARTS = _REPO_ROOT / "calibration" / "reference_charts"
 _RUNS_DIR = _REPO_ROOT / "calibration" / "runs"
 _PAIRS = ["XAUUSD", "NDX100", "EURUSD", "GBPUSD"]
 
+# Per-target-date warmup window. ``mark_swing_levels`` and the ATR
+# computations behind it iterate over the full H4/H1 frames, so on
+# fixtures that span ~6 years the test cost is dominated by years of
+# unused history. 90 days is plenty for ATR(14), 5 swing levels with
+# lookback=2, and the equal-high/low scan; keeping it constant makes
+# the runtime independent of fixture depth.
+_WARMUP_DAYS_BEFORE_TARGET = 90
+
 
 def _reference_dates() -> list[date]:
     """Pull the 18+ reference dates from the committed annotation filenames."""
@@ -219,6 +227,23 @@ def test_sweep_pipeline_runs_on_all_reference_dates(
 
     rows: list[dict] = []
     for target_date in dates:
+        # Window the fixtures down to a fixed warmup span around the
+        # target date so the test runtime stays constant as fixtures
+        # are deepened. See ``_WARMUP_DAYS_BEFORE_TARGET`` above.
+        window_start = pd.Timestamp(target_date, tz="UTC") - pd.Timedelta(
+            days=_WARMUP_DAYS_BEFORE_TARGET
+        )
+        window_end = pd.Timestamp(target_date, tz="UTC") + pd.Timedelta(days=2)
+
+        def _window(df: pd.DataFrame) -> pd.DataFrame:
+            mask = (df["time"] >= window_start) & (df["time"] <= window_end)
+            return df.loc[mask].reset_index(drop=True)
+
+        windowed_fixtures = {
+            pair: {tf: _window(df) for tf, df in fixtures[pair].items()}
+            for pair in _PAIRS
+        }
+
         for pair in _PAIRS:
             for kz_name, kz_session in (
                 ("LONDON", _KILLZONE_LONDON),
@@ -228,11 +253,11 @@ def test_sweep_pipeline_runs_on_all_reference_dates(
                 # Mark levels with as_of frozen at the killzone start
                 # (matches docs/01 §3 — bias locked once killzone begins).
                 _, _, swings, _, levels = _build_marked_levels(
-                    pair, target_date, fixtures, kz_start_utc
+                    pair, target_date, windowed_fixtures, kz_start_utc
                 )
 
                 sweeps = detect_sweeps(
-                    fixtures[pair]["M5"],
+                    windowed_fixtures[pair]["M5"],
                     levels,
                     killzone_window_utc=(kz_start_utc, kz_end_utc),
                     sweep_buffer=_INSTRUMENT_CONFIG[pair]["sweep_buffer"],

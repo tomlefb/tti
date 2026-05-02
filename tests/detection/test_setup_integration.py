@@ -83,6 +83,16 @@ _RUNS_DIR = _REPO_ROOT / "calibration" / "runs"
 _PAIRS = ["XAUUSD", "NDX100", "EURUSD", "GBPUSD"]
 _PER_CELL_CAP = 6
 
+# Per-target-date warmup window. The detector needs enough history
+# before ``target_date`` to compute ATR(14), find BIAS_SWING_COUNT=4
+# swings on H4 with lookback=2, and resolve any MSS displacement
+# lookback (20 candles). 90 days covers all of that comfortably and
+# keeps the test runtime independent of the fixture's full depth —
+# without this slice, deepening fixtures from ~6 months to ~6 years
+# made each ``build_setup_candidates`` call iterate over years of
+# unused history.
+_WARMUP_DAYS_BEFORE_TARGET = 90
+
 
 def _reference_dates() -> list[date]:
     dates: set[date] = set()
@@ -211,12 +221,26 @@ def test_setup_pipeline_runs_on_all_reference_dates(
     rows: list[dict] = []
 
     for target_date in dates:
+        # Window the fixtures down to the warmup period the detector
+        # actually consumes. ``build_setup_candidates`` already slices
+        # internally to data <= killzone start, but find_swings / ATR
+        # iterate over whatever we hand them — so on deep fixtures the
+        # call is dominated by years of unused history.
+        window_start = pd.Timestamp(target_date, tz="UTC") - pd.Timedelta(
+            days=_WARMUP_DAYS_BEFORE_TARGET
+        )
+        window_end = pd.Timestamp(target_date, tz="UTC") + pd.Timedelta(days=2)
+
+        def _window(df: pd.DataFrame) -> pd.DataFrame:
+            mask = (df["time"] >= window_start) & (df["time"] <= window_end)
+            return df.loc[mask].reset_index(drop=True)
+
         for pair in _PAIRS:
             setups = build_setup_candidates(
-                df_h4=fixtures[pair]["H4"],
-                df_h1=fixtures[pair]["H1"],
-                df_m5=fixtures[pair]["M5"],
-                df_d1=fixtures[pair]["D1"],
+                df_h4=_window(fixtures[pair]["H4"]),
+                df_h1=_window(fixtures[pair]["H1"]),
+                df_m5=_window(fixtures[pair]["M5"]),
+                df_d1=_window(fixtures[pair]["D1"]),
                 target_date=target_date,
                 symbol=pair,
                 settings=settings,
