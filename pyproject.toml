@@ -26,3 +26,6 @@ ignore = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "network: tests that hit a live external service (skip with -m 'not network')",
+]
