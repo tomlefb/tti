@@ -40,7 +40,7 @@ calibration/runs/*
 calibration/runs/**/*.parquet
 
 # --- SQLite journal (data lives on the Windows host, not in repo) ---
-data/
+/data/
 *.db
 *.sqlite
 *.sqlite3
