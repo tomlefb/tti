@@ -36,15 +36,61 @@ from __future__ import annotations
 
 import argparse
 import sys
+import zoneinfo
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pandas as pd
 from _bootstrap import load_settings
 
 # Output directory, relative to repo root. The bootstrap inserts the repo
 # root into sys.path, so we resolve via __file__ to stay robust to cwd.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _OUTPUT_DIR = _REPO_ROOT / "tests" / "fixtures" / "historical"
+
+# MT5 broker server timezone. Most prop-firm brokers (FundedNext and other
+# Cyprus / Athens-based shops) run their MT5 server on Athens or Cyprus
+# wallclock; both follow EU DST rules (EET = UTC+2 winter, EEST = UTC+3
+# summer) and resolve to identical UTC offsets at every instant, so the
+# choice between Athens and Nicosia is cosmetic. Settling on Athens to
+# match the existing src/mt5_client/time_conversion.py convention.
+_BROKER_TZ = zoneinfo.ZoneInfo("Europe/Athens")
+
+
+def _broker_seconds_series_to_utc(seconds_like) -> pd.Series:
+    """Convert an MT5 ``time`` column (broker-naive POSIX seconds) to UTC.
+
+    MT5's ``time`` field is POSIX seconds, but the encoded value is the
+    broker's local wallclock interpreted *as if* it were UTC — i.e. the
+    API returns ``datetime(broker_y, broker_m, ..., broker_s).timestamp()``
+    rather than the true UTC instant. Naively casting to UTC, as this
+    script did before, mislabels broker time as UTC and shifts every bar
+    by 2 hours (EET) or 3 hours (EEST). See
+    ``calibration/runs/timezone_audit_2026-05-02T16-04-57Z/`` for the
+    diagnostic.
+
+    Recovering the real instant: rebuild the naive wallclock from the
+    seconds, localise to the broker's IANA timezone (so DST is handled
+    correctly across multi-month / multi-year exports), then convert to
+    UTC.
+
+    Args:
+        seconds_like: array-like of broker POSIX seconds, typically the
+            ``time`` field of the structured array returned by
+            ``mt5.copy_rates_*``.
+
+    Returns:
+        ``pd.Series`` of dtype ``datetime64[ns, UTC]``. Length matches
+        the input.
+    """
+    s = pd.Series(seconds_like).reset_index(drop=True)
+    naive_wallclock = pd.to_datetime(s, unit="s")
+    aware_broker = naive_wallclock.dt.tz_localize(
+        _BROKER_TZ,
+        ambiguous="infer",
+        nonexistent="shift_forward",
+    )
+    return aware_broker.dt.tz_convert("UTC")
 
 
 # Per-timeframe candle-count requests. Numbers target ~6 months of history
@@ -213,7 +259,7 @@ def _fetch_and_save_max_history(
         }
 
     df = pd.DataFrame(rates)
-    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    df["time"] = _broker_seconds_series_to_utc(df["time"])
     df = df.sort_values("time").drop_duplicates(subset="time").reset_index(drop=True)
 
     out_path = _OUTPUT_DIR / f"{symbol}_{tf_name}.parquet"
@@ -253,13 +299,11 @@ def _fetch_and_save(mt5, pd, symbol: str, tf_name: str, tf_const: int, n_candles
 
     df = pd.DataFrame(rates)
 
-    # MT5 returns 'time' as Unix seconds in BROKER timezone. The seconds
-    # value is the broker-local wall-clock interpreted as if it were UTC,
-    # so this is technically a broker-time conversion masquerading as UTC.
-    # TODO: refactor to use src/mt5_client time-conversion helpers once
-    #       Sprint 1 implements them; until then, broker-server offset
-    #       must be normalized at consumption time, not here.
-    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    # MT5 returns 'time' as POSIX seconds in BROKER timezone (Athens /
+    # Cyprus wallclock encoded as if it were UTC). Convert via the
+    # module-level helper, which is DST-aware so a multi-month export
+    # crosses the spring-forward / fall-back transitions correctly.
+    df["time"] = _broker_seconds_series_to_utc(df["time"])
 
     # Sort + dedupe defensively. MT5 normally returns sorted, unique rows,
     # but a previous incomplete fetch can leave duplicates if the script
