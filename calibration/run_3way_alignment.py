@@ -123,6 +123,10 @@ def _restrict_to_days(df: pd.DataFrame, days: list[date]) -> pd.DataFrame:
 
 def _pair_metrics(df_a: pd.DataFrame, df_b: pd.DataFrame) -> dict:
     """Compute OHLC diff and return-correlation metrics on the common index."""
+    # Dedupe on index before intersecting — duplicate timestamps would
+    # confuse pandas alignment downstream.
+    df_a = df_a[~df_a.index.duplicated(keep="first")]
+    df_b = df_b[~df_b.index.duplicated(keep="first")]
     common = df_a.index.intersection(df_b.index)
     a = df_a.loc[common]
     b = df_b.loc[common]
@@ -153,8 +157,10 @@ def _pair_metrics(df_a: pd.DataFrame, df_b: pd.DataFrame) -> dict:
     else:
         out["return_pearson"] = float("nan")
 
-    sign_a = np.sign(a["close"] - a["open"])
-    sign_b = np.sign(b["close"] - b["open"])
+    # Use numpy arrays so a duplicate-label edge case in either series
+    # does not block the comparison.
+    sign_a = np.sign((a["close"] - a["open"]).to_numpy())
+    sign_b = np.sign((b["close"] - b["open"]).to_numpy())
     if n > 0:
         out["body_sign_agreement"] = float((sign_a == sign_b).mean())
     else:
