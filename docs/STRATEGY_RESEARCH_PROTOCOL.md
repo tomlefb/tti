@@ -298,19 +298,31 @@ sub-class).
 
 ---
 
-## 9. `BacktestResult` standard format — proposed extensions
+## 9. `BacktestResult` standard format — implemented extensions
 
-Current dataclass: `src/backtest/result.py:74` (`BacktestResult`).
+Dataclass: `src/backtest/result.py` (`BacktestResult`).
 
-Proposed additions, to be implemented before the next strategy clears
-gate 4:
+Four protocol-driven derived metrics are implemented and unit-tested
+(commits `efb7282`, `ff8ef3b`, `46bafc1`, `0cd2ffc`, `53e6123`):
 
-| Field | Type | Computation |
-|---|---|---|
-| `projected_annual_return_pct` | `float` | `mean_r * setups_per_month * 12 * 1.0` (assumes 1 % risk/trade; expressed as percent) |
-| `outlier_robustness` | `dict[str, float]` | `{"mean_r_drop_0": mean_r, "mean_r_drop_2": ..., "mean_r_drop_5": ...}` where `drop_k` = mean R after removing top-k and bot-k closed trades |
-| `temporal_concentration` | `float` | Fraction of cumulative R contributed by the single most-concentrated semester |
-| `vs_buy_and_hold` | `dict[str, float]` | `{"strategy_total_r": ..., "buy_and_hold_total_r": ..., "delta": ...}` over the same window, instrument-by-instrument |
+| Field | Type | Surface | Computation | Gate |
+|---|---|---|---|---|
+| `projected_annual_return_pct` | `float` (property) | Recomputed on access; surfaced in JSON | `mean_r × setups_per_month × 12 × risk_per_trade_pct` | §3 viability — must be `≥ 20.0` at default 1 % risk |
+| `risk_per_trade_pct` | `float` field, default `1.0` | Stored | Caller-overridable risk fraction in percent feeding the property above | §3 |
+| `outlier_robustness` | `dict[str, dict[str, float] \| None]` | Stored | `trim_0_0` / `trim_2_2` / `trim_5_5`: mean R after removing the K best and K worst closed trades, with bootstrap CI on the trimmed sample. `trim_2_2` and `trim_5_5` are `None` when `n_closed < 20`. | §5.2 — verdict must not flip directional sign across levels |
+| `temporal_concentration` | `float \| None` | Stored | `max(\|semester_R\|) / \|total_R\|` across H1/H2 buckets. `None` when no closed trades or `total_r == 0`. | §5.2 — `> 0.5` flags regime fitting |
+| `vs_buy_and_hold` | `dict[str, float] \| None` | Stored | Populated when caller passes `bh_close_start` / `bh_close_end` to `from_setups`. Returns `bh_total_return_pct`, `bh_annualized_pct` (geometric annualisation), `strategy_annualized_pct`, `strategy_minus_bh_pct`. | §5.2 — `strategy_minus_bh_pct > 0` required to clear admission |
+
+**Decoupling**: `result.py` does not load fixtures itself. Callers
+pull the buy-and-hold close prices from Dukascopy (or whichever
+source is appropriate) and pass them in.
+
+**Backwards compatibility**: legacy run JSONs (no protocol §9 keys)
+load via field defaults. The `projected_annual_return_pct` property
+recomputes from `mean_r × setups_per_month × 12 × 1.0` so it is
+always available; the other three fields default to empty / `None`
+on legacy payloads. Sanity-validated on the 42 existing run JSONs
+under `calibration/runs/` (commit `53e6123`).
 
 Existing fields used by gates: `n_setups`, `mean_r`, `mean_r_ci_95`,
 `setups_per_month`, `fraction_positive_semesters`. No removals.
