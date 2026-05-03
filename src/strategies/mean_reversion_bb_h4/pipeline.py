@@ -31,7 +31,7 @@ import pandas as pd
 
 from .bollinger import compute_bollinger
 from .excess import detect_excess
-from .filters import is_exhaustion_candle, passes_penetration
+from .filters import passes_penetration
 from .invalidation import daily_key, is_invalid
 from .return_detection import detect_return
 from .setup import build_setup
@@ -236,17 +236,15 @@ def build_setup_candidates(
     if not passes:
         return setups
 
-    bar = ohlc_h4.iloc[now_bar_idx]
-    if not is_exhaustion_candle(
-        direction=new_excess.direction,
-        bar_open=float(bar["open"]),
-        bar_high=float(bar["high"]),
-        bar_low=float(bar["low"]),
-        bar_close=float(bar["close"]),
-        min_wick_ratio=params.exhaustion_min_wick_ratio,
-        max_body_ratio=params.exhaustion_max_body_ratio,
-    ):
-        return setups
+    # v1.1 (commit ae61f70): the §2.4 exhaustion-candle filter is
+    # NOT applied. The diagnostic measured 3.7 % retention at this
+    # gate (NDX train), making it the steepest single-step drop in
+    # the chain and reducing the final setup count to 1 over 60
+    # months. The function ``is_exhaustion_candle`` is kept in
+    # ``filters.py`` as a v2/v3 candidate; the ``StrategyParams``
+    # fields ``exhaustion_min_wick_ratio`` / ``exhaustion_max_body_ratio``
+    # are kept for the same reason, but read by neither pipeline
+    # nor any audit harness in v1.1.
 
     state.pending_excesses.setdefault(instrument, []).append(
         _replace_penetration(new_excess, pen_atr)

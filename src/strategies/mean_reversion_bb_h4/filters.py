@@ -1,13 +1,13 @@
-"""Excess filters — spec §2.3 (ATR penetration) and §2.4 (exhaustion candle).
+"""Excess filters — spec §2.3 (ATR penetration), §2.4 (exhaustion, REMOVED v1.1).
 
-Two pure functions, both consumed by the pipeline immediately after
-``detect_excess`` accepts a bar. Both filters are AND-ed: an excess
-that fails either is dropped before being added to
-``StrategyState.pending_excesses``.
+In v1.1 the pipeline applies only ``passes_penetration``;
+``is_exhaustion_candle`` is kept here for reference (and still
+covered by ``test_filters.py``) but never called. See the
+function's docstring + spec §2.4 "Removal rationale" for the
+gate-3 attrition data that drove the v1.1 deactivation.
 
-Kept separate from ``detect_excess`` so the gate-3 audit harness can
-diff streaming vs full-history per-component (BB excess set, after-
-penetration set, after-exhaustion set, after-return-window set).
+Both functions are pure. ``passes_penetration`` is consumed by
+the pipeline immediately after ``detect_excess`` accepts a bar.
 """
 
 from __future__ import annotations
@@ -71,7 +71,14 @@ def is_exhaustion_candle(
     min_wick_ratio: float,
     max_body_ratio: float,
 ) -> bool:
-    """Rejection-wick / exhaustion test — spec §2.4.
+    """Rejection-wick / exhaustion test — spec §2.4 (REMOVED v1.1).
+
+    **Deprecated v1.1 (commit ae61f70)**: kept for reference, no
+    longer applied by the pipeline. See spec §2.4 "Removal rationale"
+    — the gate-3 attrition diagnostic measured 3.7 % retention at
+    this gate (the steepest in the chain), making the n_closed >= 50
+    admission floor unreachable on every grid cell. The function and
+    its tests stay in the codebase as a v2 / v3 candidate filter.
 
     For an upper-side excess, the rejection wick is the **upper** wick:
     ``high - max(open, close)``. For a lower-side excess, it is the
@@ -80,10 +87,10 @@ def is_exhaustion_candle(
     Args:
         direction: the excess direction.
         bar_open / bar_high / bar_low / bar_close: the H4 bar's OHLC.
-        min_wick_ratio: minimum ``wick / range`` to accept (spec
-            §3.1: 0.4).
-        max_body_ratio: maximum ``body / range`` to accept (spec
-            §3.1: 0.5).
+        min_wick_ratio: minimum ``wick / range`` to accept (v1.0
+            spec §3.1: 0.4).
+        max_body_ratio: maximum ``body / range`` to accept (v1.0
+            spec §3.1: 0.5).
 
     Returns:
         ``True`` iff both ratio thresholds are satisfied.
