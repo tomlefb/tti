@@ -124,9 +124,9 @@ def _q1_timestamp_alignment(out_dir: Path) -> Path:
     n_common = min(len(mt5_ret), len(dbn_ret))
     mt5_ret = mt5_ret[:n_common]
     dbn_ret = dbn_ret[:n_common]
-    # Compute cross-correlation of returns at lags ∈ [-12, +12] M5 bars
-    # (i.e. ±60 min). A non-zero peak suggests a timezone offset.
-    lags = list(range(-12, 13))
+    # Compute cross-correlation of returns at lags ∈ [-72, +72] M5 bars
+    # (i.e. ±360 min). A non-zero peak suggests a timezone offset.
+    lags = list(range(-72, 73))
     corrs: list[tuple[int, float]] = []
     for lag in lags:
         if lag >= 0:
