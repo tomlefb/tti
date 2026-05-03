@@ -350,7 +350,27 @@ unless flagged.
 
 ---
 
-## 11. TJR archive — case study
+## 11. Archived strategies — case studies
+
+Two pilots have run this protocol end-to-end as of 2026-05-03 — TJR
+(below) and breakout-retest H4 v1 (further down). They reached
+**ARCHIVE verdicts via opposite surface signatures**, which is the
+empirical evidence that the methodology distinguishes both failure
+modes without ceremony:
+
+- **TJR** spent weeks looking edge-positive on MT5 NDX (apparent
+  +1.56 R), then decomposed into outliers + regime + look-ahead
+  bugs as the audit / cross-source gates were enforced.
+- **breakout-retest H4 v1** produced no signal on any of 27 grid
+  cells; gate 4 admission failed in 92 minutes wallclock without
+  ever reaching holdout.
+
+The same gate sequence handled both. Pre-specification + binary
+verdict held under both pressure shapes — slow erosion of an
+apparent edge in one case, immediate refusal of calibration in the
+other.
+
+### 11.1 TJR archive
 
 **Status**: pivoted away from. Kept as the canonical methodological
 reference for this protocol.
@@ -390,8 +410,44 @@ re-measurement post-fix.
 The TJR codebase remains in `src/strategies/tjr/` until operator
 greenlights the move to `archived/strategies/tjr/`.
 
+### 11.2 breakout-retest H4 v1 archive
+
+**Status**: archived after gate 4 (commit `2b98cd1`, 2026-05-03).
+Spec, postmortem, and README live under
+`archived/strategies/breakout_retest_h4_v1/`.
+
+**Failure step**: gate 4 train calibration. Across 27 cells (3
+instruments × 9), zero passed the
+``n_closed >= 50 ∧ ci_low >= 0 ∧ temporal_concentration < 0.4``
+selection trio. Holdout never ran — there was no calibrated model
+to evaluate on it.
+
+**Surface signature**: win rate 30–34 % on RR 2.0 = right at the
+33 % breakeven, consistent with "the breakout-retest pattern
+itself does not predict more winners than chance on these
+instruments at H4 in 2020-2024". `mean_r_ci_95.lower` was
+negative on every one of 27 cells.
+
+**Apprentissages distilled into this protocol**:
+
+| Source | Now lives in |
+|---|---|
+| Setups/month estimates systematically too low in pre-specs | §6 pitfall list — pre-measure trigger cadence on a few months of history before locking H1 |
+| D1 trend filter alone insufficient to separate continuation from chop | §6 pitfall list — trend-following pre-specs should add an active-trend gate (ATR / ADX / HH-HL on the trade timeframe) before committing to §4 bands |
+| Win-rate aligning with RR breakeven is a diagnostic of the §5.2 chop pitfall | §6 pitfall list — call this signature explicitly so future archives spot it earlier |
+| Pre-spec + binary verdict holds when calibration produces no signal | §4 hypothesis verdict rule — the existing rule already covers it; this archive is the empirical confirmation |
+
+The implementation, tests, audit harness, and gate-4 runner stay
+in the live tree (`src/strategies/breakout_retest_h4/`,
+`tests/strategies/breakout_retest_h4/`,
+`calibration/audit_breakout_retest_h4.py`,
+`calibration/run_breakout_retest_h4_grid.py`) as architectural and
+test-pattern reference for the next HTF candidate. Re-using the
+audit harness skeleton on the next strategy is roughly a one-line
+swap.
+
 ---
 
-*Last revised: 2026-05-03 (initial draft, post strategy-research
-phase). Update on every strategy archive — archived strategies'
-"Transferable learnings" feed back here.*
+*Last revised: 2026-05-03 (second strategy archived). Update on
+every strategy archive — archived strategies' "Transferable
+learnings" feed back here.*
