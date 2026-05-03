@@ -102,6 +102,14 @@ class BacktestResult:
     # Default 1.0 — protocol-standard 1 % risk per trade.
     risk_per_trade_pct: float = 1.0
 
+    # Outlier robustness — protocol §5.2 admission criterion. Mean R
+    # recomputed after trimming the K best and K worst closed-trade
+    # R values. ``trim_2_2`` and ``trim_5_5`` are ``None`` when
+    # ``n_closed < 20`` (sample too thin for the trim to be
+    # meaningful). Each entry is a dict with ``mean_r``,
+    # ``n_remaining``, ``ci_low``, ``ci_high``.
+    outlier_robustness: dict[str, dict[str, float] | None] = field(default_factory=dict)
+
     # ------------------------------------------------------------------
     # Derived metrics — protocol §9 (STRATEGY_RESEARCH_PROTOCOL.md).
     # ------------------------------------------------------------------
@@ -154,6 +162,8 @@ class BacktestResult:
 
         mean_r_ci_95 = _bootstrap_mean_ci(rs, _BOOTSTRAP_RESAMPLES, bootstrap_seed)
 
+        outlier_robustness = _compute_outlier_robustness(rs, bootstrap_seed)
+
         max_dd = _max_drawdown_r(setups)
 
         months = _months_spanned(period_start, period_end)
@@ -182,6 +192,7 @@ class BacktestResult:
             run_timestamp=(
                 run_timestamp if run_timestamp is not None else datetime.utcnow().isoformat() + "Z"
             ),
+            outlier_robustness=outlier_robustness,
         )
 
     # ------------------------------------------------------------------
@@ -304,6 +315,51 @@ def _welch_p_value(a: list[float], b: list[float]) -> float:
         # two-sided
         p = 2.0 * (1.0 - 0.5 * (1.0 + math.erf(z / math.sqrt(2.0))))
         return p
+
+
+def _compute_outlier_robustness(
+    closed_rs: list[float], bootstrap_seed: int
+) -> dict[str, dict[str, float] | None]:
+    """Recompute mean R after trimming the K best and K worst trades.
+
+    Levels: 0/0 (baseline), 2/2, 5/5. The latter two are returned as
+    ``None`` when ``len(closed_rs) < 20`` — trimming 4 or 10 from a
+    thin sample destroys statistical meaning more than it gains.
+
+    Each level returns ``{mean_r, n_remaining, ci_low, ci_high}``
+    where the CI is the same bootstrap percentile method used for
+    the headline ``mean_r_ci_95``.
+    """
+    out: dict[str, dict[str, float] | None] = {}
+    n = len(closed_rs)
+
+    def _level(k: int) -> dict[str, float] | None:
+        if k == 0:
+            sample = list(closed_rs)
+        else:
+            if n < 2 * k:
+                return None
+            sorted_rs = sorted(closed_rs)
+            sample = sorted_rs[k : n - k]
+        if not sample:
+            return {"mean_r": 0.0, "n_remaining": 0, "ci_low": 0.0, "ci_high": 0.0}
+        mean_r = sum(sample) / len(sample)
+        ci_low, ci_high = _bootstrap_mean_ci(sample, _BOOTSTRAP_RESAMPLES, bootstrap_seed)
+        return {
+            "mean_r": mean_r,
+            "n_remaining": float(len(sample)),
+            "ci_low": ci_low,
+            "ci_high": ci_high,
+        }
+
+    out["trim_0_0"] = _level(0)
+    if n < 20:
+        out["trim_2_2"] = None
+        out["trim_5_5"] = None
+    else:
+        out["trim_2_2"] = _level(2)
+        out["trim_5_5"] = _level(5)
+    return out
 
 
 def _max_drawdown_r(setups: list[SetupRecord]) -> float:
