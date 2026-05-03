@@ -18,7 +18,7 @@ from datetime import time
 
 import pandas as pd
 
-from .excess import _is_in_killzone
+from .excess import _bar_close_time, _is_in_killzone
 from .types import BollingerBands, ExcessEvent, ReturnEvent
 
 
@@ -67,9 +67,8 @@ def detect_return(
 
     for j in range(excess.bar_index + 1, last_idx + 1):
         bar_ts = pd.Timestamp(times.iloc[j])
-        bar_time_utc = bar_ts.tz_convert("UTC").time() if bar_ts.tzinfo else bar_ts.time()
         if not _is_in_killzone(
-            bar_time_utc,
+            _bar_close_time(bar_ts),
             london_start=killzone_london_start_utc,
             london_end=killzone_london_end_utc,
             ny_start=killzone_ny_start_utc,

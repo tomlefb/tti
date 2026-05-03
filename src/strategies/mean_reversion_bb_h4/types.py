@@ -9,33 +9,30 @@ per-detector modules can stay function-only and import from here
 without cross-importing each other. The detectors are pure
 functions, the dataclasses are the only shared surface.
 
-Killzone defaults — narrative-derived deviation
------------------------------------------------
+Killzone defaults
+-----------------
 
-Spec §3.1 (table) names the operator-facing windows as London
-``08:00-12:00 UTC`` and NY ``13:00-18:00 UTC``. Spec §2.2
-(operational narrative) is more specific: on the H4 grid anchored
-at UTC midnight, **the in-killzone H4 bars are exactly the bars
-that start at 08:00 (London) and 12:00 (first NY H4 bar covering
-the 13:00 NY open)**. The 16:00–20:00 bar is explicitly OUT.
+Spec §2.2 / §3.1: London = ``[08:00, 12:00]`` UTC, NY =
+``[13:00, 18:00]`` UTC. Filter rule (Option A): a bar is
+in-killzone iff its **close timestamp** ∈ window (both-ends
+inclusive). The close timestamp is the natural comparison point
+because the strategy's detection decision is taken at the close.
 
-To keep the implementation simple — a literal
-``bar.time() in [start, end)`` membership check — the NY defaults
-here are set to ``[12:00, 16:00)`` so that a single per-window
-membership rule reproduces the spec-narrative exactly:
+On the H4 grid anchored at UTC midnight (closes ∈ {04, 08, 12,
+16, 20, 00}):
 
-| H4 bar start | London check  | NY check   | In-killzone? |
-|--------------|---------------|------------|--------------|
-| 04:00 UTC    | False         | False      | OUT          |
-| 08:00 UTC    | True          | False      | IN (London)  |
-| 12:00 UTC    | False         | True       | IN (NY)      |
-| 16:00 UTC    | False         | False      | OUT          |
-| 20:00 UTC    | False         | False      | OUT          |
+| Bar open | Bar close | London ⊆ [08, 12] | NY ⊆ [13, 18] | In-killzone? |
+|----------|-----------|:------:|:----:|:--:|
+| 04:00    | 08:00     | ✓      |      | YES (London) |
+| 08:00    | 12:00     | ✓      |      | YES (London) |
+| 12:00    | 16:00     |        | ✓    | YES (NY)     |
+| 16:00    | 20:00     |        |      | NO           |
+| 20:00    | 00:00     |        |      | NO           |
+| 00:00    | 04:00     |        |      | NO           |
 
-This is a documented deviation from the user's gate-2 brief which
-proposed ``ny_start=13:00, ny_end=18:00``; the brief defaults
-would have inverted the spec narrative (12:00 OUT, 16:00 IN). Flag
-recorded in the gate-2 deviation log at the end of the report.
+Net = 3 in-killzone H4 bars per UTC day. Same definition as the
+archived breakout-retest H4 strategy — cross-strategy
+comparability holds.
 """
 
 from __future__ import annotations
@@ -207,8 +204,8 @@ class StrategyParams:
     exhaustion_max_body_ratio: float = 0.5
     killzone_london_start_utc: time = time(8, 0)
     killzone_london_end_utc: time = time(12, 0)
-    killzone_ny_start_utc: time = time(12, 0)
-    killzone_ny_end_utc: time = time(16, 0)
+    killzone_ny_start_utc: time = time(13, 0)
+    killzone_ny_end_utc: time = time(18, 0)
 
 
 @dataclass

@@ -15,30 +15,43 @@ matches the spec's modular pseudo-code (one function per filter).
 from __future__ import annotations
 
 import math
-from datetime import time
+from datetime import time, timedelta
 
 import pandas as pd
 
 from .types import BollingerBands, ExcessEvent
 
+_H4 = timedelta(hours=4)
+
 
 def _is_in_killzone(
-    bar_time: time,
+    bar_close_time: time,
     *,
     london_start: time,
     london_end: time,
     ny_start: time,
     ny_end: time,
 ) -> bool:
-    """``True`` iff the bar's open time falls in either killzone window.
+    """``True`` iff the bar's **close** time-of-day is in either window
+    `[start, end]` (both ends inclusive).
 
-    Spec §2.2 narrative is the source: with the H4-grid-derived
-    defaults from ``types.py``, this rule reproduces the in-killzone
-    set ``{08:00, 12:00}``.
+    Spec §2.2 (Option A): the killzone gate is evaluated at the close
+    timestamp because the detection decision is taken at the close.
+    With the H4-grid defaults from ``types.py``, this rule yields the
+    in-killzone close set ``{08:00, 12:00, 16:00}`` (3 bars per UTC
+    day — same convention as the archived breakout-retest spec).
     """
-    london_in = london_start <= bar_time < london_end
-    ny_in = ny_start <= bar_time < ny_end
+    london_in = london_start <= bar_close_time <= london_end
+    ny_in = ny_start <= bar_close_time <= ny_end
     return london_in or ny_in
+
+
+def _bar_close_time(bar_open_ts: pd.Timestamp) -> time:
+    """Return the time-of-day of the H4 bar's CLOSE in UTC."""
+    close_ts = bar_open_ts + _H4
+    if close_ts.tzinfo is not None:
+        close_ts = close_ts.tz_convert("UTC")
+    return close_ts.time()
 
 
 def detect_excess(
@@ -79,9 +92,8 @@ def detect_excess(
         )
 
     bar_ts = pd.Timestamp(ohlc_h4["time"].iloc[bar_index])
-    bar_time_utc = bar_ts.tz_convert("UTC").time() if bar_ts.tzinfo else bar_ts.time()
     if not _is_in_killzone(
-        bar_time_utc,
+        _bar_close_time(bar_ts),
         london_start=killzone_london_start_utc,
         london_end=killzone_london_end_utc,
         ny_start=killzone_ny_start_utc,
