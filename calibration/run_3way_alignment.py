@@ -51,7 +51,7 @@ _RUNS_DIR = _REPO_ROOT / "calibration" / "runs"
 # Instruments present on all three sources.
 THREEWAY_INSTRUMENTS = ["XAUUSD", "NDX100", "SPX500"]
 
-N_SAMPLE_DAYS = 10
+N_SAMPLE_DAYS = 30
 RNG_SEED = 42
 
 # Verdict thresholds.
