@@ -10,6 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
+from .bias import Bias
+from .breakout import BreakoutEvent
+
 
 @dataclass(frozen=True)
 class StrategyParams:
@@ -64,7 +67,19 @@ class StrategyState:
         trades_today: per (instrument, calendar-date-UTC) counter of
             setups emitted so far today. Used by the hard
             invalidation rule in spec §2.6.
+        in_flight_breakouts: per-instrument list of breakouts already
+            detected but not yet retested (or expired). Each entry
+            carries the bias evaluated **at the breakout bar** (spec
+            §5.6: bias flips after the breakout do not invalidate an
+            in-flight setup). NOTE: this field is an extension of the
+            user-specified state surface — required because the
+            breakout/retest pair spans multiple H4 cycles, and a swing
+            locked in cycle N must still produce its retest in cycles
+            N+1..N+n_retest. Reported in the gate-2 deviation log.
     """
 
     locked_swings: set = field(default_factory=set)
     trades_today: dict[tuple[str, date], int] = field(default_factory=dict)
+    in_flight_breakouts: dict[str, list[tuple[BreakoutEvent, Bias]]] = field(
+        default_factory=dict
+    )
