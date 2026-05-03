@@ -95,13 +95,18 @@ stddev at index `i` use bars `i - period + 1 .. i` inclusive.
 ### 2.2 Excess detection
 
 An excess event fires on bar `i` when its close pierces a band
-**and** the bar's timestamp falls inside a configured killzone.
+**and** the bar's **close timestamp** falls inside a configured
+killzone.
 
 ```
 detect_excess(ohlc_h4: list[Bar], bb: BollingerBands,
-              killzones: set[time]) -> ExcessEvent | None:
+              london_kz: tuple[time, time],
+              ny_kz: tuple[time, time]) -> ExcessEvent | None:
     bar = ohlc_h4[now_idx]
-    if bar.ts.time() not in killzones:        # London / NY only
+    bar_close_t = (bar.open_ts + 4h).time()
+    in_london = london_kz[0] <= bar_close_t <= london_kz[1]
+    in_ny     = ny_kz[0]     <= bar_close_t <= ny_kz[1]
+    if not (in_london or in_ny):
         return None
     if bar.close > bb.upper[now_idx]:
         return ExcessEvent(idx=now_idx, direction="upper", bar=bar)
@@ -110,15 +115,40 @@ detect_excess(ohlc_h4: list[Bar], bb: BollingerBands,
     return None
 ```
 
-`killzones` is the discrete set of UTC H4 bar-start times that
-fall inside the London (08:00–12:00 UTC) or NY (13:00–17:00 UTC)
-windows. Concretely, on the 4-hour grid anchored at UTC midnight,
-the in-killzone H4 bars are the ones that **start** at 08:00
-(London open → noon close) and 12:00 (NY pre-open → 16:00 close);
-the protocol's NY killzone runs to 18:00 UTC so the 12:00–16:00
-bar is in. The 16:00–20:00 bar straddles end-of-NY and is **out**
-to keep the killzone strict and avoid late-session continuation
-trades.
+The killzone windows are **`London = [08:00, 12:00] UTC`** and
+**`NY = [13:00, 18:00] UTC`** — same definition as the archived
+breakout-retest H4 strategy, so cross-strategy comparability holds.
+
+Filter rule (Option A): a bar is in-killzone iff its **close
+timestamp** is inside `[start, end]` (both ends inclusive). The
+close timestamp is preferred over the open timestamp because the
+detection decision is taken at the close.
+
+Concretely, on the 4-hour grid anchored at UTC midnight, the
+in-killzone bars per UTC day are:
+
+| Bar open | Bar close | London `[08:00, 12:00]` | NY `[13:00, 18:00]` | In-killzone? |
+|---|---|:---:|:---:|:---:|
+| 04:00 | 08:00 | ✓ (close == start) | — | **YES (London)** |
+| 08:00 | 12:00 | ✓ (close == end)   | — | **YES (London)** |
+| 12:00 | 16:00 | —                  | ✓ (16 ∈ [13, 18]) | **YES (NY)** |
+| 16:00 | 20:00 | —                  | — (20 > 18)       | NO  |
+| 20:00 | 00:00 | —                  | —                 | NO  |
+| 00:00 | 04:00 | —                  | —                 | NO  |
+
+Net: **3 H4 bars per day are in-killzone** (close 08:00 + close
+12:00 for London; close 16:00 for NY). The asymmetry between
+London (2 in-bars) and NY (1 in-bar) is a structural artefact of
+the H4 grid not aligning with the NY 13:00 start; documented and
+accepted as such — re-defining NY as `[12:00, 18:00]` would shift
+the asymmetry without removing it.
+
+Edge cases (close timestamp falling on a killzone bound):
+- close `08:00` ∈ `[08:00, 12:00]` → IN London (start inclusive).
+- close `12:00` ∈ `[08:00, 12:00]` → IN London (end inclusive).
+- close `13:00` ∈ `[13:00, 18:00]` → IN NY (not on the H4 grid,
+  but defined for synthetic / non-H4 audit fixtures).
+- close `18:00` ∈ `[13:00, 18:00]` → IN NY (same).
 
 ### 2.3 Filter — minimum penetration (ATR-scaled)
 
@@ -247,7 +277,7 @@ result is data dredging and disqualifies the run.
 | `MIN_RR` | 1.0 | Anti-low-RR floor |
 | Max trades / day / instrument | 2 | Anti-overtrading |
 | Direction mode (v1) | Bidirectional, no HTF bias | Operator decision pre-spec; §7 lists the v2 candidates |
-| Killzones | London 08:00–12:00 UTC; NY 13:00–17:00 UTC (the H4 bar starting at 12:00) | Liquidity-window filter; Asia-overnight excluded |
+| Killzones | London `[08:00, 12:00]` UTC; NY `[13:00, 18:00]` UTC; bar in-killzone iff its **close timestamp** ∈ window (Option A, both-ends inclusive — see §2.2 for the per-day in-bar table) | Liquidity-window filter; same definition as the archived breakout-retest H4 strategy for cross-spec comparability |
 
 ### 3.2 Calibrated (per-instrument, two-step procedure)
 
@@ -425,14 +455,23 @@ checks).
 
 ### 5.6 Killzone boundary off-by-one
 
-The H4 grid is anchored at UTC midnight (00 / 04 / 08 / 12 / 16 /
-20). The "London killzone bar" is the H4 bar that **starts** at
-08:00 UTC and closes at 12:00 UTC; the "NY killzone bar" is the
-one that starts at 12:00 UTC and closes at 16:00 UTC. The 16:00
-bar is **out** of killzone (post-NY-close drift). Audit (gate 3)
-must verify that the streaming detector and the full-history
-reference produce the same in-killzone subset on edge days
-(month-boundary, DST transition).
+The H4 grid is anchored at UTC midnight (closes at 04 / 08 / 12 /
+16 / 20 / 00). With killzone filtering by **close timestamp** in
+`[start, end]` both-ends-inclusive (Option A, §2.2), the in-killzone
+bars per day are: close 08:00 (London), close 12:00 (London),
+close 16:00 (NY) — three bars total. The 16:00 / 20:00 / 00:00 /
+04:00 closes are out (close 04:00 falls on the boundary of nothing,
+close 20:00 > 18:00 NY end).
+
+Audit (gate 3) must verify that the streaming detector and the
+full-history reference produce the same in-killzone subset on
+edge days (month-boundary, DST transition). DST is the bigger
+hazard: the broker / data feed timestamps are UTC by convention
+in this project (CLAUDE.md rule 6), so DST should not shift the
+killzone — but if a fixture leaks broker-local time into the
+``time`` column, the close-timestamp comparison silently misclassifies.
+The audit harness pins this by re-running on the same fixture with
+two timezone hypotheses and asserting bit-identical setup lists.
 
 ---
 
