@@ -18,11 +18,12 @@ The fixture-dir override is applied per-process via the
 ``TTI_FIXTURE_DIR`` env var that ``baseline_tjr_databento.py`` already
 honours, so we get isolated fixture loading without touching settings.
 
-Overlap windows (computed from fixture min/max times):
+Overlap windows (computed from fixture min/max times, post timezone-fix and
+extended-depth MT5 fixtures, commit ``f868793``):
 
-- XAUUSD : 2025-06-20 → 2026-04-27
-- NDX100 : 2025-06-20 → 2026-04-27
-- SPX500 : 2024-11-26 → 2026-04-27 (limited by MT5 fixture end)
+- XAUUSD : 2019-12-23 → 2026-04-29 (~6.4 years; was 2025-06-20 → 2026-04-27)
+- NDX100 : 2022-10-20 → 2026-04-29 (~3.5 years; was 2025-06-20 → 2026-04-27)
+- SPX500 : 2022-10-20 → 2026-04-29 (~3.5 years; was 2024-11-26 → 2026-04-27)
 
 Six (source, instrument) jobs are dispatched via
 ``ProcessPoolExecutor``; each child resolves its own fixture dir and
@@ -56,14 +57,14 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-# Overlap windows from fixture min/max inspection. SPX is bounded
-# above by the MT5 fixture's last date (2026-04-29) and below by its
-# first date (2024-11-26); XAU/NDX are bounded by both ends of the MT5
-# 60k-row window which starts 2025-06-20.
+# Overlap windows post timezone-fix MT5 fixtures (commit f868793,
+# 1500-day depth across instruments). MT5 is the limiting source on
+# the lower end (XAU 2019-12, NDX/SPX 2022-10); DBN reaches back to
+# 2016 on all three. Upper end is 2026-04-29 (DBN bound).
 OVERLAP_WINDOWS: dict[str, tuple[str, str]] = {
-    "XAUUSD": ("2025-06-20", "2026-04-27"),
-    "NDX100": ("2025-06-20", "2026-04-27"),
-    "SPX500": ("2024-11-26", "2026-04-27"),
+    "XAUUSD": ("2019-12-23", "2026-04-29"),
+    "NDX100": ("2022-10-20", "2026-04-29"),
+    "SPX500": ("2022-10-20", "2026-04-29"),
 }
 
 SOURCES: dict[str, Path] = {
