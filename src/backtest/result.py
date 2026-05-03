@@ -98,6 +98,30 @@ class BacktestResult:
 
     run_timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
 
+    # Risk fraction (in percent) used by ``projected_annual_return_pct``.
+    # Default 1.0 — protocol-standard 1 % risk per trade.
+    risk_per_trade_pct: float = 1.0
+
+    # ------------------------------------------------------------------
+    # Derived metrics — protocol §9 (STRATEGY_RESEARCH_PROTOCOL.md).
+    # ------------------------------------------------------------------
+    @property
+    def projected_annual_return_pct(self) -> float:
+        """Projected annual return at ``risk_per_trade_pct`` risk.
+
+        Formula: ``mean_r × setups_per_month × 12 × risk_per_trade_pct``.
+
+        At the protocol-default 1 % risk per trade, the gate (§3) is
+        ``projected_annual_return_pct ≥ 20.0``. Strategies under that
+        threshold do not justify the engineering effort vs a passive
+        ETF World allocation.
+
+        The metric is intentionally a property (computed on access) so
+        it stays in sync with ``risk_per_trade_pct`` if the latter is
+        ever overridden after construction.
+        """
+        return self.mean_r * self.setups_per_month * 12.0 * self.risk_per_trade_pct
+
     # ------------------------------------------------------------------
     # Construction helper.
     # ------------------------------------------------------------------
@@ -167,6 +191,10 @@ class BacktestResult:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         d = asdict(self)
+        # Properties are not in asdict; surface protocol §9 derived
+        # metrics in the on-disk record so consumers can read them
+        # without instantiating the dataclass.
+        d["projected_annual_return_pct"] = self.projected_annual_return_pct
         # tuples become lists in JSON; round-trip restores the tuple.
         path.write_text(json.dumps(d, indent=2, sort_keys=True, default=str))
 
@@ -176,6 +204,9 @@ class BacktestResult:
         d = json.loads(path.read_text())
         d["setups"] = [SetupRecord(**s) for s in d["setups"]]
         d["mean_r_ci_95"] = tuple(d["mean_r_ci_95"])
+        # Properties are surfaced by ``to_json`` for human/consumer
+        # convenience, but cannot be passed to ``cls(**d)`` — pop them.
+        d.pop("projected_annual_return_pct", None)
         return cls(**d)
 
     # ------------------------------------------------------------------
