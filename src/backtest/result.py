@@ -117,6 +117,15 @@ class BacktestResult:
     # cumulative R == 0 (no signal to attribute).
     temporal_concentration: float | None = None
 
+    # Buy-and-hold benchmark — protocol §5.2 admission criterion. Set
+    # only when the caller passes ``bh_close_start`` / ``bh_close_end``
+    # to ``from_setups`` (caller is responsible for pulling instrument
+    # close prices from Dukascopy or another source — keeping
+    # ``BacktestResult`` decoupled from fixture paths). Dict shape:
+    # ``{bh_total_return_pct, bh_annualized_pct,
+    #    strategy_annualized_pct, strategy_minus_bh_pct}``.
+    vs_buy_and_hold: dict[str, float] | None = None
+
     # ------------------------------------------------------------------
     # Derived metrics — protocol §9 (STRATEGY_RESEARCH_PROTOCOL.md).
     # ------------------------------------------------------------------
@@ -152,11 +161,20 @@ class BacktestResult:
         params_used: dict[str, Any],
         bootstrap_seed: int = _BOOTSTRAP_SEED,
         run_timestamp: str | None = None,
+        risk_per_trade_pct: float = 1.0,
+        bh_close_start: float | None = None,
+        bh_close_end: float | None = None,
     ) -> BacktestResult:
         """Build a ``BacktestResult`` from a list of per-setup records.
 
         The list is taken as-is; if you want NOTIFY_QUALITIES gating,
         pre-filter before calling this.
+
+        ``bh_close_start`` / ``bh_close_end`` (optional) are the
+        instrument's close at ``period_start`` and ``period_end``; when
+        both are provided, the buy-and-hold comparison field is
+        populated. Caller is responsible for pulling these from the
+        relevant data source (Dukascopy by protocol convention).
         """
         closed = [s for s in setups if s.outcome not in ("entry_not_hit", "open_at_horizon")]
         rs = [s.realized_r for s in closed]
@@ -180,6 +198,11 @@ class BacktestResult:
         frac_pos_sem = _fraction_positive_semesters(setups)
         temporal_concentration = _compute_temporal_concentration(setups)
 
+        projected_pct = mean_r * spm * 12.0 * risk_per_trade_pct
+        vs_bh = _compute_vs_buy_and_hold(
+            bh_close_start, bh_close_end, period_start, period_end, projected_pct
+        )
+
         return cls(
             strategy_name=strategy_name,
             instrument=instrument,
@@ -202,6 +225,8 @@ class BacktestResult:
             ),
             outlier_robustness=outlier_robustness,
             temporal_concentration=temporal_concentration,
+            risk_per_trade_pct=risk_per_trade_pct,
+            vs_buy_and_hold=vs_bh,
         )
 
     # ------------------------------------------------------------------
@@ -417,6 +442,40 @@ def _cv_monthly(setups: list[SetupRecord]) -> float:
     var = sum((x - mean) ** 2 for x in monthly_means) / len(monthly_means)
     sd = math.sqrt(var)
     return sd / abs(mean)
+
+
+def _compute_vs_buy_and_hold(
+    bh_close_start: float | None,
+    bh_close_end: float | None,
+    period_start: date,
+    period_end: date,
+    strategy_annualized_pct: float,
+) -> dict[str, float] | None:
+    """Compute the buy-and-hold comparison block.
+
+    Returns ``None`` unless both close prices are provided and form a
+    valid window (start > 0, end > 0, period spans ≥ 1 day).
+
+    Annualisation: geometric, ``(1 + total) ** (1/years) - 1``, with
+    ``years = max(days/365.25, 1/365.25)`` so single-day periods do
+    not blow up.
+    """
+    if bh_close_start is None or bh_close_end is None:
+        return None
+    if bh_close_start <= 0 or bh_close_end <= 0:
+        return None
+    days = (period_end - period_start).days
+    if days <= 0:
+        return None
+    years = max(days / 365.25, 1.0 / 365.25)
+    bh_total_pct = (bh_close_end / bh_close_start - 1.0) * 100.0
+    bh_annualized_pct = (((1.0 + bh_total_pct / 100.0) ** (1.0 / years)) - 1.0) * 100.0
+    return {
+        "bh_total_return_pct": bh_total_pct,
+        "bh_annualized_pct": bh_annualized_pct,
+        "strategy_annualized_pct": strategy_annualized_pct,
+        "strategy_minus_bh_pct": strategy_annualized_pct - bh_annualized_pct,
+    }
 
 
 def _compute_temporal_concentration(setups: list[SetupRecord]) -> float | None:
