@@ -901,10 +901,15 @@ def write_report(
         reviews = [i for i in INSTRUMENTS if verdicts.get(i, ("", 0))[0] == "REVIEW"]
         if archives and not reviews:
             lines.append(
-                "No instrument PROMOTE; all in ARCHIVE territory. "
-                "Move to `archived/strategies/breakout_retest_h4/` "
-                "with the post-mortem README per protocol §8 and pick "
-                "the next HTF candidate from the backlog."
+                f"All instruments ARCHIVE ({', '.join(archives)}). "
+                "Move to `archived/strategies/breakout_retest_h4/` with "
+                "the post-mortem README per protocol §8 and pick the "
+                "next HTF candidate from the backlog. The post-mortem "
+                "should record: (a) what assumptions in §4 were "
+                "violated by the data, (b) any structural finding "
+                "that can inform v2 / next-strategy specs (e.g. the "
+                "observed setups/month overshoot, the win-rate "
+                "shortfall vs trend-following baseline)."
             )
         else:
             lines.append(
@@ -1002,6 +1007,14 @@ def main() -> int:
         selected_params[instrument] = {"params": best, "reason": reason}
         if best is None:
             print(f"  ⚠️ no train cell selected — {reason}", flush=True)
+            # No calibration possible → mandatory ARCHIVE per spec §4
+            # (a strategy that can't even pass calibration on train
+            # has no edge to validate on holdout). Skip downstream
+            # phases but record an explicit ARCHIVE verdict so the
+            # report doesn't say "N/A" — the no-cell-selected outcome
+            # is itself a hard verdict.
+            verdicts[instrument] = ("ARCHIVE", 0)
+            hypotheses[instrument] = {}
             continue
         print(f"  Selected: tol={best[0]}, sl={best[1]} — {reason}", flush=True)
 
