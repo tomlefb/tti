@@ -149,6 +149,14 @@ def build_setup_candidates(
     if now_bar_idx < 0:
         return setups
 
+    # Need at least ``bb_period`` bars before any band can be defined.
+    # The gate-3 audit drives this via physically-truncated frames at
+    # early cycles; production cycles always have warmup, so this is
+    # an audit-supporting guard rather than a code-path active in
+    # live runs.
+    if len(ohlc_h4) < params.bb_period:
+        return setups
+
     if bb is None:
         bb = compute_bollinger(
             ohlc_h4["close"], period=params.bb_period, multiplier=params.bb_multiplier
