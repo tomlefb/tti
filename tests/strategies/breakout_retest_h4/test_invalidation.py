@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.strategies.breakout_retest_h4.breakout import BreakoutEvent
 from src.strategies.breakout_retest_h4.invalidation import daily_key, is_invalid
@@ -13,20 +13,20 @@ from src.strategies.breakout_retest_h4.swings import Swing
 
 def _setup(*, sl_buffer: float = 0.5) -> Setup:
     swing = Swing(
-        timestamp_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        timestamp_utc=datetime(2026, 1, 1, tzinfo=UTC),
         price=110.0,
         direction="high",
         bar_index=5,
     )
     breakout = BreakoutEvent(
         swing=swing,
-        breakout_bar_timestamp=datetime(2026, 1, 1, 4, tzinfo=timezone.utc),
+        breakout_bar_timestamp=datetime(2026, 1, 1, 4, tzinfo=UTC),
         breakout_bar_close=112.0,
         direction="long",
     )
     retest = RetestEvent(
         breakout_event=breakout,
-        retest_bar_timestamp=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+        retest_bar_timestamp=datetime(2026, 1, 1, 12, tzinfo=UTC),
         retest_bar_low=109.5,
         retest_bar_high=111.0,
         retest_bar_close=110.5,
@@ -65,4 +65,4 @@ def test_valid_when_daily_count_below_cap() -> None:
 def test_daily_key_uses_instrument_and_utc_date() -> None:
     s = _setup()
     key = daily_key(s)
-    assert key == ("XAUUSD", datetime(2026, 1, 1, tzinfo=timezone.utc).date())
+    assert key == ("XAUUSD", datetime(2026, 1, 1, tzinfo=UTC).date())

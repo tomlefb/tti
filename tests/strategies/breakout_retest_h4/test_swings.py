@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, timedelta
 
 import pandas as pd
 
@@ -119,18 +119,26 @@ def test_plateau_yields_no_swing() -> None:
 def test_now_utc_filters_only_observable_pivots() -> None:
     # Two pivots: a high at idx 5 (high=110), a high at idx 17 (high=120).
     # Set now_utc so only the first is observable.
-    highs = (
-        [100, 101, 102, 103, 104, 110, 105, 104, 103, 102, 101]
-        + [102, 103, 104, 105, 106, 107, 120, 108, 107, 106, 105, 104]
-    )
+    highs = [100, 101, 102, 103, 104, 110, 105, 104, 103, 102, 101] + [
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        120,
+        108,
+        107,
+        106,
+        105,
+        104,
+    ]
     lows = [h - 2 for h in highs]
     df = _ohlc(highs, lows)
     # Confirmation for second pivot is at idx 17+5=22; capping now_utc
     # before that bar's close excludes the second pivot.
     conf2_open = df["time"].iloc[22].to_pydatetime()
-    swings_high, _ = detect_swings_h4(
-        df, n_swing=5, now_utc=conf2_open + timedelta(minutes=1)
-    )
+    swings_high, _ = detect_swings_h4(df, n_swing=5, now_utc=conf2_open + timedelta(minutes=1))
     assert [s.bar_index for s in swings_high] == [5]
 
 
@@ -141,4 +149,4 @@ def test_swing_timestamp_is_pivot_bar_open_time() -> None:
     swings_high, _ = detect_swings_h4(df, n_swing=5)
     expected_ts = df["time"].iloc[5].to_pydatetime()
     assert swings_high[0].timestamp_utc == expected_ts
-    assert swings_high[0].timestamp_utc.tzinfo == timezone.utc
+    assert swings_high[0].timestamp_utc.tzinfo == UTC

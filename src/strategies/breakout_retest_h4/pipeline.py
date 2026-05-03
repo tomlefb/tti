@@ -127,9 +127,7 @@ def build_setup_candidates(
     if bias == "neutral":
         return setups
 
-    swings_high, swings_low = detect_swings_h4(
-        ohlc_h4, n_swing=params.n_swing, now_utc=now_utc
-    )
+    swings_high, swings_low = detect_swings_h4(ohlc_h4, n_swing=params.n_swing, now_utc=now_utc)
     breakout = detect_breakout(
         ohlc_h4,
         swings_high,

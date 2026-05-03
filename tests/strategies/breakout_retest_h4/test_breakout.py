@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -345,9 +345,7 @@ def test_now_utc_caps_breakout_scan_window() -> None:
     )
     # After it closes, the breakout is observable.
     just_closed = breakout_open + pd.Timedelta(hours=4)
-    event = detect_breakout(
-        df, [swing], [], "bullish", set(), n_swing=5, now_utc=just_closed
-    )
+    event = detect_breakout(df, [swing], [], "bullish", set(), n_swing=5, now_utc=just_closed)
     assert event is not None
     assert event.breakout_bar_close == 112.0
 
@@ -389,4 +387,4 @@ def test_helpers_return_utc_timestamps() -> None:
     df = _ohlc(rows)
     sw = _swing_high(df, 0)
     assert isinstance(sw.timestamp_utc, datetime)
-    assert sw.timestamp_utc.tzinfo == timezone.utc
+    assert sw.timestamp_utc.tzinfo == UTC

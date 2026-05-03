@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,7 +14,7 @@ from src.strategies.breakout_retest_h4.swings import Swing
 
 def _swing(direction: str, level: float) -> Swing:
     return Swing(
-        timestamp_utc=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        timestamp_utc=datetime(2026, 1, 1, tzinfo=UTC),
         price=level,
         direction=direction,  # type: ignore[arg-type]
         bar_index=5,
@@ -29,13 +29,13 @@ def _make_long_retest(
 ) -> RetestEvent:
     breakout = BreakoutEvent(
         swing=_swing("high", level),
-        breakout_bar_timestamp=datetime(2026, 1, 1, 4, tzinfo=timezone.utc),
+        breakout_bar_timestamp=datetime(2026, 1, 1, 4, tzinfo=UTC),
         breakout_bar_close=112.0,
         direction="long",
     )
     return RetestEvent(
         breakout_event=breakout,
-        retest_bar_timestamp=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+        retest_bar_timestamp=datetime(2026, 1, 1, 12, tzinfo=UTC),
         retest_bar_low=retest_low,
         retest_bar_high=retest_close + 1.0,
         retest_bar_close=retest_close,
@@ -50,13 +50,13 @@ def _make_short_retest(
 ) -> RetestEvent:
     breakout = BreakoutEvent(
         swing=_swing("low", level),
-        breakout_bar_timestamp=datetime(2026, 1, 1, 4, tzinfo=timezone.utc),
+        breakout_bar_timestamp=datetime(2026, 1, 1, 4, tzinfo=UTC),
         breakout_bar_close=89.0,
         direction="short",
     )
     return RetestEvent(
         breakout_event=breakout,
-        retest_bar_timestamp=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+        retest_bar_timestamp=datetime(2026, 1, 1, 12, tzinfo=UTC),
         retest_bar_low=retest_close - 1.0,
         retest_bar_high=retest_high,
         retest_bar_close=retest_close,

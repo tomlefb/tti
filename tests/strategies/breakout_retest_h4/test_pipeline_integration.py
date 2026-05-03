@@ -16,7 +16,7 @@ Three scenarios:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -326,14 +326,10 @@ def test_state_locks_swing_after_breakout() -> None:
     state = StrategyState()
     # Drive only up to the breakout bar's close.
     breakout_close_utc = df_h4["time"].iloc[11].to_pydatetime() + timedelta(hours=4)
-    build_setup_candidates(
-        df_h4, close_d1, "XAUUSD", params, state, now_utc=breakout_close_utc
-    )
+    build_setup_candidates(df_h4, close_d1, "XAUUSD", params, state, now_utc=breakout_close_utc)
     assert len(state.locked_swings) == 1
     # Second call at the same now_utc must not re-emit.
-    build_setup_candidates(
-        df_h4, close_d1, "XAUUSD", params, state, now_utc=breakout_close_utc
-    )
+    build_setup_candidates(df_h4, close_d1, "XAUUSD", params, state, now_utc=breakout_close_utc)
     assert len(state.locked_swings) == 1
 
 
@@ -359,8 +355,6 @@ def test_short_d1_history_skips_cycle_without_error() -> None:
         max_risk_distance=10.0,
     )
     state = StrategyState()
-    now_utc = datetime(2026, 1, 5, tzinfo=timezone.utc)
-    setups = build_setup_candidates(
-        df_h4, short_d1, "XAUUSD", params, state, now_utc=now_utc
-    )
+    now_utc = datetime(2026, 1, 5, tzinfo=UTC)
+    setups = build_setup_candidates(df_h4, short_d1, "XAUUSD", params, state, now_utc=now_utc)
     assert setups == []

@@ -198,10 +198,7 @@ def test_now_utc_excludes_in_progress_bar() -> None:
     # now_utc set so idx 2 is exactly the "current" bar (not yet
     # treated as observable by the retest scan per the spec).
     now_utc = df["time"].iloc[2].to_pydatetime()
-    assert (
-        detect_retest(df, event, n_retest=8, retest_tolerance=1.0, now_utc=now_utc)
-        is None
-    )
+    assert detect_retest(df, event, n_retest=8, retest_tolerance=1.0, now_utc=now_utc) is None
     # After idx 2 closes (now_utc covers idx 3+), retest is observable.
     later = df["time"].iloc[2].to_pydatetime() + pd.Timedelta(hours=8)
     retest = detect_retest(df, event, n_retest=8, retest_tolerance=1.0, now_utc=later)

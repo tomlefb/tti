@@ -80,6 +80,4 @@ class StrategyState:
 
     locked_swings: set = field(default_factory=set)
     trades_today: dict[tuple[str, date], int] = field(default_factory=dict)
-    in_flight_breakouts: dict[str, list[tuple[BreakoutEvent, Bias]]] = field(
-        default_factory=dict
-    )
+    in_flight_breakouts: dict[str, list[tuple[BreakoutEvent, Bias]]] = field(default_factory=dict)
