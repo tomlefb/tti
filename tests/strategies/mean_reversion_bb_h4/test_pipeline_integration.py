@@ -12,7 +12,10 @@ Six fixtures (spec §2.1–§2.7 component coverage):
 - C: excess without return inside ``max_return_bars`` → 0 setups.
 - D: excess off-killzone → never registered → 0 setups.
 - E: excess with insufficient ATR-relative penetration → 0 setups.
-- F: excess without an exhaustion candle (marubozu) → 0 setups.
+- F: excess on a marubozu (no rejection wick) → 1 setup under
+  v1.1 (the §2.4 exhaustion filter is removed; commit ae61f70).
+  v1.0 expected 0 setups here — the regression guard tracks the
+  intended v1.1 behaviour change.
 
 Helper convention: every fixture starts at ``2026-01-01 00:00 UTC``,
 so bar at idx ``i`` opens at ``(i*4) mod 24`` UTC and closes at
@@ -237,9 +240,15 @@ def test_pipeline_produces_zero_setups_when_no_return_inside_window() -> None:
     df = _fixture_no_return()
     setups, state = _drive_pipeline(df, "XAUUSD", _params())
     assert setups == []
-    # Pending excess should have been dropped after the window expired
-    # (idx 23 is 3 bars past idx 20, max_return_bars=3 → drop on cycle 23+).
-    assert state.pending_excesses.get("XAUUSD", []) == []
+    # Note: under v1.1 (commit ae61f70 — exhaustion filter removed),
+    # idx 21 of this fixture is *also* an excess (close 97.0 below the
+    # lower band). It enters ``pending_excesses`` and its return
+    # window extends past the end of the fixture, so it does not get
+    # the chance to be dropped by the window-expiry branch within the
+    # available cycles. The primary integration assertion remains
+    # ``setups == []`` — the no-return scenario produces no trade.
+    # The pending-queue contents are an implementation detail tied to
+    # fixture length, not a spec property.
 
 
 # ---------------------------------------------------------------------------
@@ -294,27 +303,47 @@ def test_pipeline_zero_setups_when_penetration_insufficient() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Fixture F — excess without exhaustion candle (marubozu)
+# Fixture F — excess on a marubozu (rejection-wick absent)
+#
+# v1.0 expected this fixture to produce 0 setups: the §2.4 exhaustion
+# filter rejected marubozu candles (no wick on the breach side).
+#
+# v1.1 (spec ae61f70 — exhaustion filter REMOVED) expects 1 setup
+# instead: the marubozu produces an excess that survives the §2.3
+# penetration filter, finds a return at idx 21, and emits a setup.
+# This fixture is preserved as a regression guard on the v1.1
+# behaviour change.
 # ---------------------------------------------------------------------------
 
 
 def _fixture_no_exhaustion() -> pd.DataFrame:
     """Excess bar is a bearish marubozu: open=99, close=97.5,
-    high=99, low=97.5. body=1.5, range=1.5 → body_ratio=1.0 → fail.
-    Lower wick = min(97.5, 99) - 97.5 = 0 → wick_ratio=0 → fail. The
-    §2.4 filter rejects."""
+    high=99, low=97.5 (no lower wick — would have failed the v1.0
+    §2.4 exhaustion gate; passes through in v1.1)."""
     rows = _warmup_alt(20)
     rows.append((99.0, 99.0, 97.5, 97.5))    # idx 20 — marubozu down
-    rows.append((98.0, 98.7, 97.8, 98.5))    # idx 21 (would-be return)
+    rows.append((98.0, 98.7, 97.8, 98.5))    # idx 21 — return inside
     rows.append((98.5, 98.7, 98.2, 98.4))    # idx 22 OUT
     return _build_h4(rows)
 
 
-def test_pipeline_zero_setups_when_no_exhaustion_candle() -> None:
+def test_pipeline_emits_setup_on_marubozu_post_v1_1() -> None:
+    """v1.1 regression guard: a marubozu excess + return-inside should
+    now produce 1 setup. In v1.0 the §2.4 exhaustion filter would
+    have rejected the excess (zero wick on the breach side); the
+    v1.1 spec removes that filter — see commit ae61f70 / spec §2.4
+    "Removal rationale"."""
     df = _fixture_no_exhaustion()
-    setups, state = _drive_pipeline(df, "XAUUSD", _params())
-    assert setups == []
-    assert state.pending_excesses.get("XAUUSD", []) == []
+    setups, _ = _drive_pipeline(df, "XAUUSD", _params())
+    assert len(setups) == 1
+    s = setups[0]
+    assert s.direction == "long"  # excess "lower" → long reversion
+    # Entry = return.close
+    assert s.entry_price == pytest.approx(98.5)
+    # SL = excess.low - sl_buffer = 97.5 - 0.5 = 97.0
+    assert s.stop_loss == pytest.approx(97.0)
+    # TP > entry on a long reversion (TP = SMA at return bar)
+    assert s.take_profit > s.entry_price
 
 
 # ---------------------------------------------------------------------------

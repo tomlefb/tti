@@ -389,7 +389,9 @@ def smoke_test() -> bool:
         ("no_return", _fixture_no_return(), 0),
         ("off_killzone", _fixture_off_killzone(), 0),
         ("shallow_penetration", _fixture_shallow_penetration(), 0),
-        ("no_exhaustion", _fixture_no_exhaustion(), 0),
+        # v1.1 (commit ae61f70): the §2.4 exhaustion filter is removed,
+        # so the marubozu fixture now emits 1 setup. v1.0 expected 0.
+        ("marubozu_emits_post_v1_1", _fixture_no_exhaustion(), 1),
     ]
 
     # Use the same loosened-min_rr parametrization as the integration
