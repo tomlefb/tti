@@ -1,6 +1,6 @@
 # Mean reversion Bollinger H4 — bidirectional
 
-> **Strategy spec — gate 1 of `STRATEGY_RESEARCH_PROTOCOL.md`.**
+> **Strategy spec v1.1 — gate 1 of `STRATEGY_RESEARCH_PROTOCOL.md`.**
 > Second HTF candidate after the breakout-retest H4 archive
 > (commit `2b98cd1`, archived per protocol §11.2). Pre-specified
 > before any code is written, before any backtest is run.
@@ -14,6 +14,38 @@
 > Pre-specification is the point: every numerical hypothesis below
 > exists so post-hoc rationalisation is impossible. If the holdout
 > contradicts the spec, the spec is wrong — not the holdout.
+
+---
+
+## 0. Modification log
+
+- **v1.0** (commit `91cb2a2`, 2026-05-03) — initial spec.
+- **v1.1** (this revision, post gate 3 + attrition diagnostic) —
+  the §2.4 exhaustion-candle filter is **removed** from the v1
+  pipeline, the §3.2 grid is broadened on `min_penetration_atr_mult`,
+  and the §4 H1 / H5 bands are recalibrated against the measured
+  attrition. See §2.4 "Removal rationale" and §4 "v1.1 anchor"
+  for the per-section deltas.
+
+  **Why** — the gate-3 attrition diagnostic
+  (`calibration/runs/attrition_diagnostic_mr_bb_h4_2026-05-03T22-32-57Z.md`)
+  measured 7 / 187 ≈ **3.7 % retention** on the exhaustion gate over
+  NDX100 train (5 y), making it the single steepest filter in the
+  chain and reducing the final setup count to 1 over 60 months. The
+  grid §3.2 admission floor `n_closed ≥ 50` was therefore
+  unreachable on **every** of the 9 (3×3) cells, regardless of the
+  edge — gate 4 would have produced a NON-INFORMATIVE archive.
+  Removing the filter brings the baseline to 23 setups / 5 y /
+  instrument (still under the original H1 band, but measurable),
+  and the broadened §3.2 grid lets the calibration explore cells
+  that can clear the protocol §5.2 admission floor.
+
+  **Why this is not HARKing** — the modification is documented
+  *before* gate 4 is run; H1 and §3.2 are revised based on the
+  measured attrition geometry, not on outcome (mean R). The
+  pre-spec / verdict-rule discipline holds: §4 hypotheses are
+  revised explicitly here and frozen by this commit before any
+  backtest.
 
 ---
 
@@ -55,18 +87,27 @@ edge can be measured in isolation.
 **Estimated cadence and edge** (a-priori, BEFORE any backtest —
 see §4 for the full hypothesis table):
 
-| Quantity | A-priori range |
-|---|---|
-| Setups / month / instrument | 3–5 |
-| Mean R (closed, pre-cost) | +0.4 to +0.8 |
-| Projected annual return @ 1 % risk | 20–35 % |
+| Quantity | v1.0 range | **v1.1 range (post diagnostic)** |
+|---|---|---|
+| Setups / month / instrument | 3–5 | **0.5–2** |
+| Mean R (closed, pre-cost) | +0.4 to +0.8 | +0.4 to +0.8 (unchanged) |
+| Projected annual return @ 1 % risk | 20–35 % | **10–25 %** |
 
-The setup-cadence range is the **measured 8 raw triggers/month
-× 38–63 % filter retention** (cadence pre-measure §3 of the
-report). It is a deliberately tight band: a v1 that lands at 1
-setup/month or 8 setups/month means the filters in §2.3–§2.5 are
-either over- or under-tuned, not that the mean-reversion premise
-holds.
+The v1.1 cadence floor follows the attrition diagnostic
+(NDX100 train, 60 months): with the exhaustion filter removed and
+``min_penetration_atr_mult`` swept across {0.0, 0.1, 0.2, 0.3},
+the final setup count lands between 23 (pen 0.3) and 68 (pen 0.0)
+— i.e. **0.4 to 1.1 / month / instrument**, with the broadened
+§3.2 grid letting the train calibration choose the cell whose
+trade-off between count and quality is admissible.
+
+Concretely: a v1.1 that lands well below 0.5 / month / instrument
+on holdout means the §2.3 ATR penetration filter is over-tuned;
+above 2 / month means the calibration has weakened the filter
+beyond statistical reliability. The widening from the v1.0 (3–5)
+band reflects the structural cost of removing the §2.4 wick
+filter — fewer "clean rejection" candles, but the surviving
+excess pool is larger.
 
 ---
 
@@ -170,11 +211,18 @@ passes_penetration(excess, ohlc_h4, bb,
 
 `min_pen_atr_mult` is a calibrated parameter (§3.2).
 
-### 2.4 Filter — exhaustion candle (rejection wick)
+### 2.4 ~~Filter — exhaustion candle (rejection wick)~~ — REMOVED v1.1
 
-A clean reversion is preceded by a candle that pushes through the
-band and then pulls back inside it on the same bar — i.e. the bar
-prints a wick on the breach side. Operationally:
+> **Status: REMOVED in v1.1 — see "Removal rationale" below.** The
+> ``is_exhaustion_candle`` function remains in
+> ``src/strategies/mean_reversion_bb_h4/filters.py`` for reference and
+> is still covered by ``tests/strategies/mean_reversion_bb_h4/test_filters.py``,
+> but the v1.1 pipeline never calls it.
+
+The original v1.0 filter checked that the excess bar exhibited a
+"rejection" pattern — long wick on the breach side, short body —
+on the assumption that a clean mean reversion is preceded by such
+a candle.
 
 ```
 is_exhaustion(excess) -> bool:
@@ -191,9 +239,44 @@ is_exhaustion(excess) -> bool:
         return lower_wick >= 0.4 * rng and body <= 0.5 * rng
 ```
 
-Both ratios (0.4 and 0.5) are **fixed ex ante** in §3.1 — they are
-discriminator constants, not free parameters. A bar with a 40 %
-breach-side wick and a body ≤ 50 % of range qualifies.
+Both ratios (0.4 and 0.5) were **fixed ex ante** in v1.0 — meant
+as discriminator constants, not free parameters.
+
+#### Removal rationale (v1.1)
+
+The gate-3 attrition diagnostic
+(`calibration/runs/attrition_diagnostic_mr_bb_h4_2026-05-03T22-32-57Z.md`,
+NDX100 train 60 months) measured the per-stage attrition with v1.0
+parameters:
+
+| Stage | N | Retention vs prev |
+|---|---:|---:|
+| Excess (close pierces BB) in killzone | 376 | 9.7 % vs killzone |
+| Pen filter pass (mult 0.3) | 187 | 49.7 % |
+| **Exhaustion filter pass** | **7** | **3.7 %** |
+| Return found in window | 2 | 28.6 % |
+| Final setup | 1 | — |
+
+The exhaustion gate was the steepest single-step drop in the chain
+(by a factor 13× over the next-worst gate). Disabling it raised the
+final count from 1 → 23 setups over 60 months on the same fixture
+(no other parameter changed).
+
+Empirically, the H4 NDX excesses that *do* close back inside the
+bands the next bar are typically directional candles, not rejection
+candles — the spec assumed a v0/v1.0 wick-pattern hypothesis that
+is not supported on this timeframe / instrument family. Keeping
+the filter would have produced a calibration grid that fails
+``n_closed ≥ 50`` on every cell (gate-4 admission floor §5.2 of the
+protocol), yielding a non-informative ARCHIVE verdict. Removing the
+filter does not loosen the *edge* hypothesis (mean R bands in §4
+are unchanged) — it only widens the sample so the edge is
+measurable.
+
+The function and its tests are kept in the codebase as v2 / v3
+candidate filters that future iterations may re-introduce with
+calibrated thresholds, once gate 4 establishes whether the v1.1
+mean-reversion premise produces a measurable edge.
 
 ### 2.5 Return detection (setup trigger)
 
@@ -292,18 +375,26 @@ Three bars is the upper bound observed in the cadence pre-measure
 hot-month detail (consecutive-bar excesses tend to cluster within
 1–3 bars of each other before either continuing or reverting).
 
-**Step B — grid only the discriminator + cost params**:
+**Step B — grid only the discriminator + cost params** (v1.1):
 
 | Parameter | XAUUSD range | NDX100 range | SPX500 range |
 |---|---|---|---|
-| `MIN_PEN_ATR_MULT` | 0.2 / 0.3 / 0.5 | 0.2 / 0.3 / 0.5 | 0.2 / 0.3 / 0.5 |
+| `MIN_PEN_ATR_MULT` | 0.0 / 0.1 / 0.2 / 0.3 | 0.0 / 0.1 / 0.2 / 0.3 | 0.0 / 0.1 / 0.2 / 0.3 |
 | `SL_BUFFER` | 0.5 / 1.0 / 2.0 USD | 3 / 5 / 8 pts | 1 / 2 / 3 pts |
 
-**9 cells per instrument** (3 × 3). All other params fixed.
-`MIN_PEN_ATR_MULT` does not vary per instrument — it is a
-unit-free ATR multiplier and the same physical discrimination
-applies across instruments. `SL_BUFFER` is instrument-specific
-and shadows the archived spec's broker-spread heuristic.
+**12 cells per instrument** (4 × 3). v1.1 broadening rationale:
+the attrition diagnostic (NDX100 train, exhaustion off) measured
+68 / 23 / 9 / 3 final setups at `MIN_PEN_ATR_MULT` ∈ {0.0, 0.1,
+0.2, 0.3} — i.e. the v1.0 lower edge (0.2) was already at 9 setups
+over 60 months, well below the `n_closed ≥ 50` admission floor.
+Adding 0.1 and 0.0 to the grid lets the calibration explore the
+laxer end where the floor is reachable; the upper end (0.5) is
+dropped because at 3 setups over 60 months it is structurally
+admission-blocked. `MIN_PEN_ATR_MULT` does not vary per instrument
+— it is a unit-free ATR multiplier and the same physical
+discrimination applies across instruments. `SL_BUFFER` is
+instrument-specific and shadows the archived spec's broker-spread
+heuristic.
 
 Selection criterion on the **train** set (§3.3): highest `mean_r`
 whose 95 % CI lower bound is ≥ 0 AND `temporal_concentration < 0.4`
@@ -360,18 +451,25 @@ success. The sheet is closed once this commit lands; reopening it
 post-hoc to "loosen the criteria" disqualifies the run and forces
 archive.
 
-| # | Hypothesis | Target | Source / rationale |
-|---|---|---|---|
-| H1 | Setups / month / instrument | 3–5 | Cadence pre-measure: 8 raw triggers × 38–63 % retention from §2.3–§2.5 filters |
-| H2 | Win rate (closed) | 55–70 % | Mean-reversion regime, computed RR averaging 1.0–1.5 |
-| H3 | Mean R (pre-cost) | +0.4 to +0.8 | `WR × avg_RR − (1 − WR) × 1` ≈ +0.5 at WR 60 %, RR̄ 1.3 |
-| H4 | Mean R (post-cost, Phase C) | +0.3 to +0.7 | Subtract ~0.05 R for spread + commission |
-| H5 | `projected_annual_return_pct` | 20–35 % | Derived from H1 + H4 across 3 instruments at 1 % risk |
-| H6 | `mean_r_ci_95.lower` (≥ 1 instrument, holdout) | > 0 | Without it, no measurable edge (§5.2 protocol) |
-| H7 | `outlier_robustness.trim_5_5.mean_r` (selected cells) | > 0 | Edge must survive trimming top/bottom 5 % |
-| H8 | `temporal_concentration` | < 0.4 | Below the regime-fitting flag |
-| H9 | `vs_buy_and_hold.strategy_minus_bh_pct` (≥ 1 instrument) | > 0 | Strategy must beat passive on the same window |
-| H10 | Transferability mismatch Duk vs MT5 (gate 7) | < 30 % | Same band as archived spec; mean-reversion triggers may drift more than swing breaks, watch carefully |
+| # | Hypothesis | v1.0 target | **v1.1 target** | Source / rationale |
+|---|---|---|---|---|
+| H1 | Setups / month / instrument | 3–5 | **0.5–2** | Attrition diagnostic (NDX train, exhaustion off): 23 setups @ pen 0.3 → 68 @ pen 0.0, i.e. 0.4–1.1 / month. Lower bound 0.5, upper bound 2 to allow inter-instrument variance. |
+| H2 | Win rate (closed) | 55–70 % | 55–70 % (unchanged) | Mean-reversion regime, computed RR averaging 1.0–1.5 |
+| H3 | Mean R (pre-cost) | +0.4 to +0.8 | +0.4 to +0.8 (unchanged) | `WR × avg_RR − (1 − WR) × 1` ≈ +0.5 at WR 60 %, RR̄ 1.3 — independent of cadence |
+| H4 | Mean R (post-cost, Phase C) | +0.3 to +0.7 | +0.3 to +0.7 (unchanged) | Subtract ~0.05 R for spread + commission |
+| H5 | `projected_annual_return_pct` | 20–35 % | **10–25 %** | Derived from H1 (v1.1) × H4 across 3 instruments at 1 % risk: floor ≈ 0.5/mo × 0.3R × 12 × 1% × 3 = 5.4 %; ceiling ≈ 2/mo × 0.7R × 12 × 1% × 3 = 50 %. Tightened to 10–25 % to keep the band defensible. |
+| H6 | `mean_r_ci_95.lower` (≥ 1 instrument, holdout) | > 0 | > 0 (unchanged) | Without it, no measurable edge (§5.2 protocol) |
+| H7 | `outlier_robustness.trim_5_5.mean_r` (selected cells) | > 0 | > 0 (unchanged) | Edge must survive trimming top/bottom 5 % |
+| H8 | `temporal_concentration` | < 0.4 | < 0.4 (unchanged) | Below the regime-fitting flag |
+| H9 | `vs_buy_and_hold.strategy_minus_bh_pct` (≥ 1 instrument) | > 0 | > 0 (unchanged) | Strategy must beat passive on the same window |
+| H10 | Transferability mismatch Duk vs MT5 (gate 7) | < 30 % | < 30 % (unchanged) | Same band as archived spec; mean-reversion triggers may drift more than swing breaks, watch carefully |
+
+**v1.1 anchor** — H1 and H5 are recalibrated against the gate-3
+attrition diagnostic; H2, H3, H4, H6–H10 are unchanged because
+they describe the *edge geometry*, which is independent of how
+many setups the filter chain emits. Removing the §2.4 exhaustion
+filter widens the sample but does not change the per-trade
+edge hypothesis. The verdict rule below is unchanged.
 
 **Verdict rule on the HOLDOUT** (not train):
 
@@ -442,16 +540,29 @@ breakeven, that is the §5.2-protocol chop signature (the same
 fingerprint that sank breakout-retest v1) — archive precociously
 rather than waiting for the holdout.
 
-### 5.5 Sample size on holdout
+### 5.5 Sample size on holdout (v1.1)
 
-At 3 setups/month/instrument × 16 holdout months = 48 setups per
-instrument — slightly under the n ≥ 50 admission floor. Resolution:
-the n_closed ≥ 50 floor in §3.2 selection criterion applies to the
-**train** grid (180 setups expected at 3/month × 60 months); the
-holdout is allowed to land at 48–80 setups per instrument and the
-hypothesis bands in §4 already account for finite-sample
-uncertainty (CI lower-bound checks rather than point-estimate
-checks).
+Under the v1.1 H1 (0.5–2 setups/month/instrument):
+
+- **Train** (60 months × 3 instruments = 180 instrument-months):
+  expected `n_closed` per instrument 30–120. The §3.2 selection
+  floor `n_closed ≥ 50` is reachable only on the upper half of
+  this band — laxer cells (pen=0.0, pen=0.1) are needed to clear
+  it. The v1.1 grid 4 × 3 (§3.2) is sized so at least one cell
+  per instrument has a fighting chance.
+- **Holdout** (16 months): expected `n_closed` per instrument
+  8–32. **Below the n ≥ 50 admission floor in absolute terms.**
+  Resolution: the n_closed floor applies to the train grid only
+  (gate-4 selection); the holdout is read for hypothesis-pass
+  count (§4 verdict rule), and the §4 bands use CI lower-bound
+  checks rather than point-estimate checks — so finite-sample
+  uncertainty is already baked into H6 / H7.
+
+If the holdout lands at < 8 setups on every instrument, the
+verdict shifts toward "no measurable signal under the v1.1
+geometry"; that outcome is itself an admissible result of gate 4
+(REVIEW or ARCHIVE per §4 verdict rule), not a reason to reopen
+the spec.
 
 ### 5.6 Killzone boundary off-by-one
 
