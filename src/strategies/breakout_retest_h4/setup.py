@@ -1,4 +1,12 @@
-"""Setup builder — spec §2.5."""
+"""Setup builder — spec §2.5.
+
+Long: entry = retest_close, SL = retest_low - sl_buffer,
+      TP = entry + (entry - SL) * rr_target.
+Short symmetric.
+
+The bias passed in here is the bias evaluated **at the breakout bar**
+and locked into the setup lifecycle (spec §5.6).
+"""
 
 from __future__ import annotations
 
@@ -50,5 +58,58 @@ def build_setup(
     sl_buffer: float,
     rr_target: float,
 ) -> Setup:
-    """Build a Setup from a confirmed retest — see spec §2.5. Stub."""
-    raise NotImplementedError
+    """Build a Setup from a confirmed retest (spec §2.5).
+
+    Args:
+        retest_event: the retest produced by ``detect_retest``.
+        instrument: instrument label, e.g. ``"XAUUSD"``.
+        bias_d1: bias to lock into the setup. Per spec §5.6 the
+            caller passes the bias evaluated at the breakout bar.
+        sl_buffer: instrument-priced buffer added beyond the retest
+            extreme.
+        rr_target: fixed RR multiple — spec §3.1 anchors at 2.0.
+
+    Returns:
+        ``Setup`` with arithmetic per spec §2.5.
+
+    Raises:
+        ValueError: if the computed risk is zero or negative (a
+            degenerate retest where the close coincides with the
+            retest extreme + buffer; the caller should then fail the
+            invalidation rule, but we surface it explicitly so a
+            silent divide-by-zero never produces a TP arithmetic bug).
+    """
+    breakout = retest_event.breakout_event
+    direction = breakout.direction
+    entry = retest_event.retest_bar_close
+
+    if direction == "long":
+        sl = retest_event.retest_bar_low - sl_buffer
+        risk = entry - sl
+    else:
+        sl = retest_event.retest_bar_high + sl_buffer
+        risk = sl - entry
+
+    if risk <= 0:
+        raise ValueError(
+            f"build_setup: non-positive risk ({risk}) — degenerate retest. "
+            f"entry={entry} sl={sl} direction={direction}"
+        )
+
+    if direction == "long":
+        tp = entry + risk * rr_target
+    else:
+        tp = entry - risk * rr_target
+
+    return Setup(
+        timestamp_utc=retest_event.retest_bar_timestamp,
+        instrument=instrument,
+        direction=direction,
+        entry_price=float(entry),
+        stop_loss=float(sl),
+        take_profit=float(tp),
+        risk_reward=float(rr_target),
+        bias_d1=bias_d1,
+        breakout_event=breakout,
+        retest_event=retest_event,
+    )
