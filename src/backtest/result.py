@@ -110,6 +110,13 @@ class BacktestResult:
     # ``n_remaining``, ``ci_low``, ``ci_high``.
     outlier_robustness: dict[str, dict[str, float] | None] = field(default_factory=dict)
 
+    # Temporal concentration — protocol §5.2: fraction of cumulative R
+    # carried by the single most-concentrated semester. ``> 0.5``
+    # means one semester carries > 50 % of the result — a strong
+    # regime-fitting signal. ``None`` when no closed trades or
+    # cumulative R == 0 (no signal to attribute).
+    temporal_concentration: float | None = None
+
     # ------------------------------------------------------------------
     # Derived metrics — protocol §9 (STRATEGY_RESEARCH_PROTOCOL.md).
     # ------------------------------------------------------------------
@@ -171,6 +178,7 @@ class BacktestResult:
 
         cv = _cv_monthly(setups)
         frac_pos_sem = _fraction_positive_semesters(setups)
+        temporal_concentration = _compute_temporal_concentration(setups)
 
         return cls(
             strategy_name=strategy_name,
@@ -193,6 +201,7 @@ class BacktestResult:
                 run_timestamp if run_timestamp is not None else datetime.utcnow().isoformat() + "Z"
             ),
             outlier_robustness=outlier_robustness,
+            temporal_concentration=temporal_concentration,
         )
 
     # ------------------------------------------------------------------
@@ -408,6 +417,38 @@ def _cv_monthly(setups: list[SetupRecord]) -> float:
     var = sum((x - mean) ** 2 for x in monthly_means) / len(monthly_means)
     sd = math.sqrt(var)
     return sd / abs(mean)
+
+
+def _compute_temporal_concentration(setups: list[SetupRecord]) -> float | None:
+    """Fraction of cumulative R carried by the most-concentrated semester.
+
+    Buckets closed trades into ISO calendar halves (H1: Jan–Jun,
+    H2: Jul–Dec) and returns ``max_semester_R / total_R``. Returns
+    ``None`` when there is no closed trade, or when the cumulative R
+    is zero (nothing to attribute).
+
+    A value above 0.5 means a single 6-month bucket carries more than
+    half of the result — strong regime-fitting signal per protocol §5.2.
+    """
+    by_sem: dict[str, float] = defaultdict(float)
+    n_closed = 0
+    for s in setups:
+        if s.outcome in ("entry_not_hit", "open_at_horizon"):
+            continue
+        ts = datetime.fromisoformat(s.timestamp_utc.replace("Z", "+00:00"))
+        half = "H1" if ts.month <= 6 else "H2"
+        by_sem[f"{ts.year}-{half}"] += s.realized_r
+        n_closed += 1
+    if n_closed == 0 or not by_sem:
+        return None
+    total_r = sum(by_sem.values())
+    if total_r == 0:
+        return None
+    # Concentration is measured against absolute total R so a
+    # negative-total strategy with one outsized loss reads as a
+    # concentration too (sign is preserved).
+    max_abs_contrib = max(abs(v) for v in by_sem.values())
+    return max_abs_contrib / abs(total_r)
 
 
 def _fraction_positive_semesters(setups: list[SetupRecord]) -> float:
