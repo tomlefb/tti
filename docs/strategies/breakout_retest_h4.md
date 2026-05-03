@@ -173,7 +173,12 @@ Applied **after** `build_setup`, before the setup is committed:
   giant-stop trade).
 - News window: scheduled high-impact USD news ±30 min around `entry`
   → skip. (Source TBD at gate 2; if no clean source, ship without
-  this filter and document.)
+  this filter and document.) **Status post-gate-2 (commit `9db76df`):
+  filter not active in v1 — no clean source identified within the
+  gate-2 budget. The hook is in place in
+  `src/strategies/breakout_retest_h4/invalidation.py` (module
+  docstring) for a future `is_news_window` helper to be ORed into
+  `is_invalid` once a calendar feed is wired up.**
 - Per-day cap: ≥ 2 setups already produced today on this instrument
   → skip.
 
@@ -237,6 +242,34 @@ metrics (§5.5 protocol) are read from the holdout.** If the train
 and holdout diverge sharply on `mean_r`, that is an overfit signal
 — stop, do not promote. Quantitative rule: `|mean_r_train −
 mean_r_holdout| > 0.5R` flags overfit; investigate before admission.
+
+### 3.4 Implementation note — runtime state surface
+
+Documented post-gate-2 (commit `9db76df`). The cycle-spanning state
+container `StrategyState` has three fields, all owned exclusively by
+the pipeline (detectors are pure):
+
+- **`locked_swings: set[Swing]`** — swings that have already produced
+  a breakout event. A swing is added the first time `detect_breakout`
+  returns it and never re-emits (anti double-dip on the same level —
+  §5.1).
+- **`trades_today: dict[(instrument, date_utc), int]`** — per
+  instrument, per UTC calendar day counter of setups emitted. Read
+  by the per-day cap rule (§2.6).
+- **`in_flight_breakouts: dict[instrument, list[(BreakoutEvent,
+  frozen_bias)]]`** — queue of breakouts already detected but not yet
+  retested or expired. Each entry carries the bias evaluated **at
+  the breakout bar** (§5.6). This field is an extension of the
+  state surface that emerged at gate 2: the breakout / retest pair
+  spans multiple H4 cycles, and once the swing is in
+  `locked_swings`, the next cycle would otherwise have no way to
+  attach a retest to its parent breakout. Without the queue the
+  strategy never produces a setup.
+
+The queue is the single source of truth for §5.6 (bias frozen at
+breakout). Cycles re-attempt retest on every queued breakout under
+its frozen bias; subsequent D1 bias flips do not invalidate an
+in-flight setup.
 
 ---
 
@@ -329,13 +362,19 @@ the `BreakoutEvent` and used for the entire setup lifecycle; bias
 flips after that do not invalidate an in-flight setup. This is also
 audited (gate 3).
 
+**Implementation (gate 2)**: the freeze is materialised by storing
+`(BreakoutEvent, frozen_bias)` tuples in
+`StrategyState.in_flight_breakouts` (§3.4). The pipeline never reads
+the current cycle's bias when retesting an in-flight breakout — it
+reads the queue's frozen bias.
+
 ---
 
 ## 6. Validation plan — mapping to protocol gates
 
 | Gate | Action | Pass criterion |
 |---|---|---|
-| **3** Audit look-ahead | `calibration/audit_breakout_retest_h4.py` runs the detector in (a) full-history mode and (b) cycle-by-cycle streaming mode on the same Duk fixture; diff the produced setup lists | 100 % bit-identical |
+| **3** Audit look-ahead | `calibration/audit_breakout_retest_h4.py` runs the detector in (a) full-history mode and (b) cycle-by-cycle streaming mode on the same Duk fixture; diff the produced setup lists. The gate-2 integration test `tests/strategies/breakout_retest_h4/test_pipeline_integration.py` (long, short, failed-retest fixtures with known expected setups) is the smoke-test fixture-reference for the diff before swapping in the real Duk window. | 100 % bit-identical |
 | **4** Backtest Duk | Tick simulator on train → param selection (Step B grid) → re-run on holdout per instrument with selected params; emit `BacktestResult` per (instrument, set) cell | All 10 hypotheses (§4) measured on the holdout |
 | **5** Cross-check DBN | Same Step-B-selected params on Databento, same holdout window | Mean R within ±30 % of Duk (per §5.3 protocol) |
 | **6** Sanity MT5 | Same params on MT5 (~1.4 y depth — overlaps the holdout) | Same direction sign as Duk; no violent contradiction |
