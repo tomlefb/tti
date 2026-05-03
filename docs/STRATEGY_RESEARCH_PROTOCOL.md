@@ -98,6 +98,32 @@ To clear 20 % at 1 % risk, `Mean R × Setups/month ≥ 1.67`.
 | 1.00 | 1.7 | Excellent; check for survivorship/overfit |
 | ≥ 1.5 | 1.2 | Suspect — investigate before believing |
 
+**Frequency sweet spot** (operator decision, 2026-05-03 — folded
+in after cadence pre-measure for the mean-reversion BB H4 spec):
+
+| Setups/month/instrument | Diagnostic |
+|---|---|
+| < 1 | Insufficient — not viable |
+| 1–3 | Hard to measure; viable only with very high Mean R (> 1R) |
+| 3–5 | OK — comfortable sample size |
+| **5–15** | **Sweet spot** — edge measurable in 6–12 months of holdout, capital actively working |
+| 15–25 | High — costs start to bite seriously |
+| > 25 | Too high — costs dominate the edge |
+
+**Methodological notes**:
+
+- Any spec that targets **< 3 or > 25 setups/month** must justify
+  the choice explicitly (cite the structural reason: HTF D1
+  cadence floor, anti-cost discipline, etc.).
+- The **5–15 sweet spot maximises information per unit of time**
+  and is the **default target** unless a structural reason
+  argues otherwise (e.g. a D1-anchored strategy that naturally
+  produces 1–2/month).
+- The mean-reversion BB H4 v1 spec targets 3–5/month, **just
+  below the sweet spot — assumed conservative in v1 for filter
+  discipline**. If v1 admits, v2 should consider relaxing the
+  filter stack to push cadence into the 5–15 band.
+
 **Operational rule**: every `BacktestResult` must report the field
 `projected_annual_return_pct` and the gate compares it to **20.0**
 (see §9).
@@ -427,6 +453,14 @@ to evaluate on it.
 itself does not predict more winners than chance on these
 instruments at H4 in 2020-2024". `mean_r_ci_95.lower` was
 negative on every one of 27 cells.
+
+**Cadence note** (added 2026-05-03 after §3 sweet-spot revision):
+the ≈ 8 setups/month observed on this strategy were perfectly
+acceptable under the revised 5–15 sweet spot — the archive driver
+was the **near-zero Mean R**, not the cadence. The §11.2 lesson
+#1 ("setups/month systematically too low in pre-specs") is about
+the *pre-spec H1* being miscalibrated, not about the *measured*
+cadence being out of the viable band.
 
 **Apprentissages distilled into this protocol**:
 
