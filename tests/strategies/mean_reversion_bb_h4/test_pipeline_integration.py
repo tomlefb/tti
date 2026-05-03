@@ -15,13 +15,24 @@ Six fixtures (spec §2.1–§2.7 component coverage):
 - F: excess without an exhaustion candle (marubozu) → 0 setups.
 
 Helper convention: every fixture starts at ``2026-01-01 00:00 UTC``,
-so bar at idx ``i`` opens at ``(i * 4) mod 24`` UTC. The first BB(20)
-defined index is 19 (= 04:00, OUT-of-killzone — not used as the
-trigger bar). The first IN-killzone BB-defined bar is idx 20
-(= 08:00 London). Idx 21 (= 12:00 NY) is the first eligible return
-candidate. Idx 22 (= 16:00) and idx 23 (= 20:00) are OUT.
+so bar at idx ``i`` opens at ``(i*4) mod 24`` UTC and closes at
+``((i+1)*4) mod 24`` UTC. The killzone gate (spec §2.2 Option A)
+filters by **close** timestamp in ``[start, end]`` both-ends-inclusive,
+``London = [08:00, 12:00]`` / ``NY = [13:00, 18:00]``:
 
-Many tests assert ``min_rr=0.3`` rather than the spec default 1.0:
+| idx | open hr | close hr | killzone? |
+|-----|---------|----------|-----------|
+| 19  | 04:00   | 08:00    | London IN (close == start, inclusive) |
+| 20  | 08:00   | 12:00    | London IN |
+| 21  | 12:00   | 16:00    | NY IN     |
+| 22  | 16:00   | 20:00    | OUT       |
+| 23  | 20:00   | 00:00    | OUT       |
+
+The fixtures use idx 20 as the excess trigger (London), idx 21 as
+the return candidate (NY). idx 19 is BB-defined but only carries a
+warmup close — never piercing the bands.
+
+Many tests use ``min_rr=0.3`` rather than the spec default 1.0:
 the small fixtures cannot easily reach RR ≥ 1 because the SL
 distance (anchored at the excess wick + buffer) dominates the SMA
 reward in low-volatility synthetic series. The min_rr floor itself
@@ -114,8 +125,9 @@ def _drive_pipeline(
 
 
 def _params(**overrides) -> StrategyParams:
-    """Default integration-test params — narrative-derived killzone defaults
-    via ``StrategyParams``; min_rr loosened to 0.3 for fixture geometry
+    """Default integration-test params — spec-aligned killzone defaults
+    (London [08:00, 12:00] UTC, NY [13:00, 18:00] UTC) via
+    ``StrategyParams``; min_rr loosened to 0.3 for fixture geometry
     (see module docstring)."""
     base = {
         "min_penetration_atr_mult": 0.3,
@@ -236,18 +248,19 @@ def test_pipeline_produces_zero_setups_when_no_return_inside_window() -> None:
 
 
 def _fixture_off_killzone() -> pd.DataFrame:
-    """Excess engineered to land at idx 22 (16:00 UTC, OUT). The bar
-    structurally pierces the lower band but ``detect_excess`` rejects
-    it on the killzone gate — no excess queued, no setup."""
+    """Excess engineered to land at idx 22 (open 16:00, close 20:00).
+    Close 20:00 ∉ [13:00, 18:00] NY → OUT. The bar structurally
+    pierces the lower band but ``detect_excess`` rejects it on the
+    killzone gate — no excess queued, no setup."""
     rows = _warmup_alt(22)              # idx 0..21 alternating
-    rows.append((97.6, 97.7, 97.3, 97.5))   # idx 22 — would pierce, but 16:00 OUT
-    rows.append((98.0, 98.7, 98.0, 98.5))   # idx 23 — would-be return, also OUT
+    rows.append((97.6, 97.7, 97.3, 97.5))   # idx 22 — close 20:00 OUT
+    rows.append((98.0, 98.7, 98.0, 98.5))   # idx 23 — close 00:00 OUT
     return _build_h4(rows)
 
 
 def test_pipeline_zero_setups_when_excess_off_killzone() -> None:
     df = _fixture_off_killzone()
-    assert df["time"].iloc[22].hour == 16
+    assert df["time"].iloc[22].hour == 16  # bar OPEN — close lands at 20:00
     setups, state = _drive_pipeline(df, "XAUUSD", _params())
     assert setups == []
     assert state.pending_excesses.get("XAUUSD", []) == []

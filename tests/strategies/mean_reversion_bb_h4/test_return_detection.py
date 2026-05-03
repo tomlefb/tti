@@ -12,11 +12,13 @@ from src.strategies.mean_reversion_bb_h4.types import ExcessEvent
 
 
 def _killzone() -> dict:
+    """Spec §2.2 / §3.1 defaults — London [08:00, 12:00], NY [13:00, 18:00].
+    Filter on close timestamp, both-ends inclusive."""
     return {
         "killzone_london_start_utc": time(8, 0),
         "killzone_london_end_utc": time(12, 0),
-        "killzone_ny_start_utc": time(12, 0),
-        "killzone_ny_end_utc": time(16, 0),
+        "killzone_ny_start_utc": time(13, 0),
+        "killzone_ny_end_utc": time(18, 0),
     }
 
 
