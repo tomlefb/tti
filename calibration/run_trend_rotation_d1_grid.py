@@ -81,9 +81,31 @@ GRID_SPEC = list(
     )
 )
 
-# Selection criteria (frozen).
-MIN_N_CLOSED = 50
-MAX_TEMPORAL_CONCENTRATION = 0.4
+# Selection criteria — class-adapted per protocol §3 / §3.5.
+# Two profiles: ``class_a`` (single-asset wick-sensitive HTF, the
+# §5.2 standard) and ``class_b`` (multi-asset cross-sectional
+# momentum, §3.5 revised). The trend_rotation_d1 strategy is
+# class B by §11.4.1, so the default profile here is class_b. The
+# original verdict on c2ddce2 was computed under the ``class_a``
+# profile (the §5.2 standard at the time); ``--criteria-class
+# class_a`` reproduces that verdict for cross-check.
+SELECTION_PROFILES: dict[str, dict] = {
+    "class_a": {
+        "min_n_closed": 50,
+        "min_ci_low": 0.0,
+        "max_temporal_concentration": 0.4,
+        "h8_max": 0.4,
+        "label": "§5.2 standard (class A — single-asset wick-sensitive HTF)",
+    },
+    "class_b": {
+        "min_n_closed": 100,
+        "min_ci_low": -0.1,
+        "max_temporal_concentration": 0.6,
+        "h8_max": 0.6,
+        "label": "§3.5 revised (class B — multi-asset cross-sectional momentum)",
+    },
+}
+DEFAULT_CRITERIA_CLASS = "class_b"
 
 # Cost model — flat per-trade R fraction.
 COST_R_PER_TRADE = 0.030  # ~$30 on $1000 risk
@@ -117,9 +139,13 @@ HYPOTHESES: dict[str, dict] = {
     },
     "H6": {"name": "mean_r_ci_95.lower > 0"},
     "H7": {"name": "outlier_robustness.trim_5_5.mean_r > 0"},
+    # H8 max is class-adapted at runtime — default placeholder is the
+    # §3.5 class-B value (0.6); the §5.2 standard 0.4 is plugged when
+    # ``--criteria-class class_a`` is selected. The runtime override
+    # is the source of truth (see ``main`` and ``evaluate_hypotheses``).
     "H8": {
-        "name": "temporal_concentration < 0.4",
-        "max": MAX_TEMPORAL_CONCENTRATION,
+        "name": "temporal_concentration < {h8_max}",
+        "max": 0.6,  # default class-B; runtime-set
     },
     "H9": {"name": "vs_buy_and_hold.strategy_minus_bh_pct > 0"},
     "H10": {
@@ -285,30 +311,34 @@ def run_grid(
 
 def select_best_cell(
     grid: dict[tuple[int, int, int], tuple[BacktestResult, list[TradeExit]]],
+    profile: dict,
 ) -> tuple[tuple[int, int, int] | None, str]:
-    """Apply pre-specified selection criteria. Returns
-    ``((mom, K, rebal), reason)`` or ``(None, reason)``."""
+    """Apply class-adapted selection criteria from ``profile`` (one of
+    ``SELECTION_PROFILES``). Returns ``((mom, K, rebal), reason)`` or
+    ``(None, reason)``."""
     candidates: list[tuple[tuple[int, int, int], BacktestResult]] = []
     for cell, (result, _exits) in grid.items():
         n_closed = sum(
             1 for s in result.setups if s.outcome not in ("entry_not_hit", "open_at_horizon")
         )
-        if n_closed < MIN_N_CLOSED:
+        if n_closed < profile["min_n_closed"]:
             continue
         ci_low = result.mean_r_ci_95[0]
-        if ci_low < 0:
+        if ci_low < profile["min_ci_low"]:
             continue
         if (
             result.temporal_concentration is None
-            or result.temporal_concentration >= MAX_TEMPORAL_CONCENTRATION
+            or result.temporal_concentration >= profile["max_temporal_concentration"]
         ):
             continue
         candidates.append((cell, result))
 
     if not candidates:
         return None, (
-            "no train cell met all three selection criteria "
-            "(n_closed >= 50, ci_low >= 0, temporal_concentration < 0.4)"
+            f"no train cell met all three selection criteria under "
+            f"{profile['label']} (n_closed >= {profile['min_n_closed']}, "
+            f"ci_low >= {profile['min_ci_low']}, "
+            f"temporal_concentration < {profile['max_temporal_concentration']})"
         )
 
     def _bh_or_zero(r: BacktestResult) -> float:
@@ -353,7 +383,18 @@ def _post_cost_projected_annual(result: BacktestResult) -> float:
     )
 
 
-def evaluate_hypotheses(holdout: BacktestResult) -> dict[str, dict]:
+def evaluate_hypotheses(
+    holdout: BacktestResult,
+    *,
+    h8_max: float = 0.6,
+) -> dict[str, dict]:
+    """Evaluate the 10 §4 hypotheses on the holdout BacktestResult.
+
+    H8 threshold is class-adapted via ``h8_max`` (default 0.6 for
+    class B per §3.5; pass 0.4 for class A). H6 / H7 stay strict
+    regardless of class — they are the final-judge floors per
+    §3.5.
+    """
     out: dict[str, dict] = {}
 
     spm = holdout.setups_per_month
@@ -416,9 +457,10 @@ def evaluate_hypotheses(holdout: BacktestResult) -> dict[str, dict]:
 
     tc = holdout.temporal_concentration
     out["H8"] = {
-        "name": HYPOTHESES["H8"]["name"],
+        "name": HYPOTHESES["H8"]["name"].format(h8_max=h8_max),
         "value": tc,
-        "pass": tc is not None and tc < HYPOTHESES["H8"]["max"],
+        "pass": tc is not None and tc < h8_max,
+        "threshold": h8_max,
     }
 
     bh = holdout.vs_buy_and_hold
@@ -728,14 +770,32 @@ def main() -> int:
         default=None,
         help="Override the output directory.",
     )
+    parser.add_argument(
+        "--criteria-class",
+        choices=list(SELECTION_PROFILES.keys()),
+        default=DEFAULT_CRITERIA_CLASS,
+        help=(
+            "Selection-criteria profile per protocol §3 / §3.5. "
+            f"Default '{DEFAULT_CRITERIA_CLASS}' applies the §3.5 "
+            "class-B revised floors (the strategy is class B per §11.4.1). "
+            "Use 'class_a' to reproduce the original §5.2 standard "
+            "verdict (commit c2ddce2)."
+        ),
+    )
     args = parser.parse_args()
+
+    profile = SELECTION_PROFILES[args.criteria_class]
+    print(f"Selection profile: {profile['label']}", flush=True)
 
     t_start = time.perf_counter()
     ts = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
+    out_dir_default = (
+        f"gate4_trend_rotation_d1_{ts}"
+        if args.criteria_class == "class_a"
+        else f"gate4_trend_rotation_d1_v1_revised_{ts}"
+    )
     out_dir = (
-        Path(args.out_dir)
-        if args.out_dir
-        else RUNS_DIR / f"gate4_trend_rotation_d1_{ts}"
+        Path(args.out_dir) if args.out_dir else RUNS_DIR / out_dir_default
     )
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -756,7 +816,7 @@ def main() -> int:
         json.dumps(grid_export, indent=2, default=str)
     )
 
-    selected_cell, selection_reason = select_best_cell(train_grid)
+    selected_cell, selection_reason = select_best_cell(train_grid, profile)
     print(f"\n  Selected cell: {selected_cell} — {selection_reason}", flush=True)
 
     holdout = None
@@ -793,7 +853,7 @@ def main() -> int:
             flush=True,
         )
 
-        hypotheses = evaluate_hypotheses(result)
+        hypotheses = evaluate_hypotheses(result, h8_max=profile["h8_max"])
         verdict = verdict_from_hypotheses(hypotheses)
         print(
             f"  Verdict: {verdict[0]} ({verdict[1]} hypotheses PASS)",
