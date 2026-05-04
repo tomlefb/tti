@@ -480,8 +480,55 @@ test-pattern reference for the next HTF candidate. Re-using the
 audit harness skeleton on the next strategy is roughly a one-line
 swap.
 
+### 11.3 mean-reversion BB H4 v1.1 archive
+
+**Status**: archived after gate 4 (commit `ec4bdd4`, 2026-05-04).
+Spec, postmortem, attrition diagnostic, and README live under
+`archived/strategies/mean_reversion_bb_h4_v1_1/`. Second
+consecutive HTF archive after `breakout_retest_h4_v1`.
+
+**Failure step**: gate 4 train calibration. Across the v1.1
+broadened 36-cell grid (3 instruments × 12 cells, `min_pen ∈
+{0.0, 0.1, 0.2, 0.3}` × instrument-specific `sl_buffer`), zero
+cells passed the `n_closed >= 50 ∧ ci_low >= 0 ∧
+temporal_concentration < 0.4` selection trio. The binding gate
+was `ci_low >= 0` — every cell's 95 % CI on mean R covered
+zero. Holdout never ran.
+
+**Surface signature**: win rate 28–37 % (XAU/NDX) and 14–28 %
+(SPX), well below the strategy's RR ≈ 1.0 breakeven (~50 %).
+SPX `pen=0.0` cells had `ci_high` *negative* on 1.0 / 2.0 / 3.0
+sl_buffer — measurably losing, not merely indistinguishable.
+NDX `pen=0.3 sl=3.0` showed `mean_r=+1.250` at face value but
+`n=23` (below admission floor) and `ci_low=-0.238` —
+small-sample artefact. Same broad family as breakout-retest's
+chop fingerprint.
+
+**Process step that worked**: the v1.1 modification (commit
+`ae61f70`) made the strategy *measurable* — H1 cadence target
+hit on XAU/NDX at `pen=0.0` (1.55 / 1.13 month). What v1.1 could
+not fix is the absence of edge in the underlying mean-reversion
+premise on these three instruments at H4 in 2020-2024.
+
+**Apprentissages distilled into this protocol**:
+
+| Source | Now lives in |
+|---|---|
+| Pre-spec attrition blind spot — cadence pre-measure on raw triggers systematically under-estimates cumulative filter attrition | §1 (new step 1.5 "attrition diagnostic") + §6 pitfall list — measure per-stage retention BEFORE freezing H1 |
+| Chop fingerprint applies to mean reversion too, not only trend-following | §6 pitfall list — extended to "win rate ≈ RR breakeven (whatever direction the strategy takes)" as a precocious-archive marker |
+| The "modification documented before gate 4 on the basis of a diagnostic" pattern is methodologically defensible | §11.3 (this section) records the v1.0 → v1.1 transition as a worked example; §4 verdict-rule discipline holds because hypotheses are revised explicitly with a versioned spec change, not loosened post-hoc |
+| `n_closed >= 50` admission floor protects against small-sample apparent edges (e.g. NDX +1.25 R on n=23) | §5.2 — keep the floor; consider raising it for HTF strategies with short holdout windows |
+
+The implementation, tests, audit harness, and gate-4 runner stay
+in the live tree (`src/strategies/mean_reversion_bb_h4/`,
+`tests/strategies/mean_reversion_bb_h4/`,
+`calibration/audit_mean_reversion_bb_h4.py`,
+`calibration/run_mean_reversion_bb_h4_grid.py`) as architectural
+reference. The v1.1 spec changelog (§0 of the archived SPEC.md)
+documents the modification log pattern for future iterations.
+
 ---
 
-*Last revised: 2026-05-03 (second strategy archived). Update on
+*Last revised: 2026-05-04 (third strategy archived). Update on
 every strategy archive — archived strategies' "Transferable
 learnings" feed back here.*
