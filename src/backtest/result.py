@@ -67,7 +67,12 @@ class SetupRecord:
     direction: str  # "long" | "short"
     quality: str  # "A+" | "A" | "B"
     realized_r: float
-    outcome: str  # "tp_runner_hit" | "tp1_hit_only" | "sl_hit" | "sl_before_entry" | "entry_not_hit" | "open_at_horizon"
+    outcome: str  # "tp_runner_hit" | "tp1_hit_only" | "sl_hit" | "sl_before_entry" | "entry_not_hit" | "open_at_horizon" | "rebalance_close"
+    # ``rebalance_close`` is the signed-PnL outcome used by rotation
+    # strategies that have no SL/TP at the position level — exit is
+    # forced by the next rebalance's re-ranking. Win / loss is then
+    # decided by ``realized_r`` sign rather than by the SL/TP-hit
+    # labels, see ``from_setups`` win-rate computation.
 
 
 @dataclass(frozen=True)
@@ -179,8 +184,16 @@ class BacktestResult:
         closed = [s for s in setups if s.outcome not in ("entry_not_hit", "open_at_horizon")]
         rs = [s.realized_r for s in closed]
 
-        wins = sum(1 for s in closed if s.outcome in ("tp1_hit_only", "tp_runner_hit"))
-        losses = sum(1 for s in closed if s.outcome in ("sl_hit", "sl_before_entry"))
+        wins = sum(
+            1 for s in closed
+            if s.outcome in ("tp1_hit_only", "tp_runner_hit")
+            or (s.outcome == "rebalance_close" and s.realized_r > 0)
+        )
+        losses = sum(
+            1 for s in closed
+            if s.outcome in ("sl_hit", "sl_before_entry")
+            or (s.outcome == "rebalance_close" and s.realized_r < 0)
+        )
         win_rate = wins / (wins + losses) if (wins + losses) else 0.0
         mean_r = sum(rs) / len(rs) if rs else 0.0
         median_r = statistics.median(rs) if rs else 0.0

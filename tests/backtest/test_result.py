@@ -382,3 +382,39 @@ def test_from_json_handles_legacy_payload_without_new_fields(tmp_path: Path) -> 
     assert loaded.projected_annual_return_pct == pytest.approx(
         loaded.mean_r * loaded.setups_per_month * 12.0 * 1.0
     )
+
+
+# --- rebalance_close outcome (rotation strategies) --------------------
+
+
+def test_rebalance_close_counts_as_closed_with_signed_pnl() -> None:
+    """The rotation outcome ``rebalance_close`` is decided as win or
+    loss by the sign of ``realized_r`` rather than by SL/TP labels.
+
+    Closed-trade tally (n_closed, mean_r, win_rate, CI) must include
+    these records on equal footing with classical SL/TP outcomes."""
+    setups = [
+        _record("2024-01-15T10:00:00+00:00", +0.5, outcome="rebalance_close"),
+        _record("2024-02-15T10:00:00+00:00", -0.3, outcome="rebalance_close"),
+        _record("2024-03-15T10:00:00+00:00", +0.8, outcome="rebalance_close"),
+        _record("2024-04-15T10:00:00+00:00", -0.2, outcome="rebalance_close"),
+    ]
+    result = _build_result(setups)
+    assert result.n_setups == 4
+    assert result.mean_r == pytest.approx((0.5 - 0.3 + 0.8 - 0.2) / 4)
+    # Wins on positive realized_r, losses on negative; zero is neither.
+    assert result.win_rate == pytest.approx(0.5)  # 2 wins / (2 wins + 2 losses)
+
+
+def test_rebalance_close_zero_pnl_is_neither_win_nor_loss() -> None:
+    """A rebalance_close trade with realized_r == 0 is closed but not
+    counted as win or loss — same convention as the open_at_horizon
+    handling of degenerate zero-R outcomes."""
+    setups = [
+        _record("2024-01-15T10:00:00+00:00", +0.5, outcome="rebalance_close"),
+        _record("2024-02-15T10:00:00+00:00", 0.0, outcome="rebalance_close"),
+        _record("2024-03-15T10:00:00+00:00", -0.5, outcome="rebalance_close"),
+    ]
+    result = _build_result(setups)
+    # 1 win, 1 loss, 1 neither → win_rate = 1 / 2 = 0.5.
+    assert result.win_rate == pytest.approx(0.5)
