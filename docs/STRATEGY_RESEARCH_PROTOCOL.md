@@ -406,6 +406,70 @@ later archive (referenced inline). Re-read this list at gates 1
       percent. Project-wide convention; mismatches caused two re-runs
       during TJR.
 
+### 6.5 Cross-source comparison alignment protocol
+
+(Added 2026-05-05 after the trend_rotation_d1 v1.1 gate 7 false-archive
+incident — see §11.4.2.)
+
+For any **class-B** strategy (HTF multi-asset cross-sectional
+momentum per §11.4.1), all cross-source comparisons run at gates 5
+(Databento partial cross-check), 6 (MT5 sanity), and 7
+(transferability) **MUST** apply the alignment protocol below
+**before** any metric is computed. Class-A and class-C strategies
+should follow it whenever their gate-5/6/7 comparison spans assets
+with heterogeneous trading hours (24/7 crypto vs Mon-Fri equities,
+broker-tz FX vs UTC indices, etc.).
+
+**(a) Timestamp normalisation**: every bar in every source must be
+re-labelled to the same UTC convention before comparison. The
+project standard is **00:00 UTC** for D1 bars (equivalent to
+Yahoo's convention; MT5 broker-stored times must be normalised
+to calendar-date by dropping the broker-tz hour, not by shifting
+the price). Sources that natively label at a different hour
+(Athens-broker midnight on FX/metals/crypto = 21:00/22:00 UTC)
+are normalised by `df.index = df.index.normalize()` after the
+canonical broker→UTC conversion.
+
+**(b) Calendar intersection**: each per-asset frame is restricted
+to dates present in **all** sources being compared. Bars exclusive
+to one source (Yahoo BTC weekend bars vs MT5 broker Mon-Fri-only
+BTC; MT5 broker Sunday-evening index opens vs Yahoo's NYSE
+calendar; etc.) are dropped. The intersection step is per-asset,
+not per-panel — different assets retain different common-date
+sets, and each asset is scored on its own intersected frame.
+
+**(c) Per-asset diagnostic**: before publishing a gate-5 / 6 / 7
+verdict, the report MUST list, per asset, the bar-count loss
+caused by the (a)+(b) alignment. Any asset losing > 30 % of its
+bars is flagged "at risk of residual sample bias" — the gate may
+still pass, but the verdict report explicitly notes which assets
+are downsampled and how much.
+
+**Justification**: comparing bars sampled at different timestamps
+(or covering different calendar densities) is comparing different
+samples of the same underlying market and produces artefacts that
+look like transferability failures without being one. The
+trend_rotation_d1 v1.1 gate 7 false-archive (raw exact-match
+22.7 %, corrected 81.5 %) was caused entirely by this — same cell,
+same cell, same window, same code; the only thing that changed was
+applying (a)+(b). See §11.4.2 case study.
+
+**Universal application**: this protocol applies to any future
+strategy classified class-B in §11.4.1. The TJR-class (class-A)
+HTF wick-sensitive strategies were less exposed because gate-7's
+"setup-level mismatch" metric is intrinsically looser than the
+"top-K basket equality" metric used by class-B — but the same
+alignment is mandatory if class-A or class-C strategies expand
+their universe to include 24/7 instruments alongside Mon-Fri
+ones.
+
+**Implementation reference**:
+`calibration/run_gates_678_corrected.py` (commit pending) is the
+worked example. The two helpers
+`calibration.investigate_top_k_divergence.normalise_to_calendar_date`
+and `intersect_panels` are the canonical implementation of (a)
+and (b); reuse them rather than re-implementing.
+
 ---
 
 ## 7. Prioritised strategies (post-TJR pivot)
@@ -803,6 +867,82 @@ Three classes are recognised:
 class explicitly. The class determines which §3 / §3.5 floors
 apply at gate 4 and which H8 threshold applies in the §4
 holdout evaluation.
+
+### 11.4.2 trend_rotation_d1 v1.1 — gates 6/7/8 PASS after measurement-artefact fix
+
+(Added 2026-05-05 alongside §6.5 — captures the "false archive
+narrowly avoided" case study that motivated §6.5.)
+
+The v1.1 cadence-oriented re-spec (rebalance ≤ 7 d, K ≤ 5,
+spec commit `bb12a95`) selected cell **126/5/3** at gate 4 with
+a REVIEW verdict (5/9 hypotheses, drift +1.361 R train→holdout;
+commit `efe599e`). Operator path was option (B): walk-forward 20-y
+on Yahoo (commit `93cd60a`) and excl-BTC sanity (commit `1b1c36b`)
+returned a stationarity-confirmed edge at magnitude 15-35 %/year.
+Operational risk simulation (commit `1644e55`) classified the
+strategy as **risky-but-acceptable** for Phase-1 (54.3 % attempt-pass
+at 1 % risk). Economic simulations baseline + pyramidal (commits
+`9dac82c` / `f282332`) recommended `PROMOTE gate 6 MT5 sanity`.
+
+**Gates 6/7/8 first run** (commit pending; 2026-05-05) on the
+raw MT5 + Yahoo panels produced a structurally surprising result:
+
+| Gate | Raw-panel verdict | Detail |
+|---|---|---|
+| 6 — MT5 sanity | ⚠️ REVIEW | direction agreement 63.1 % < 70 % threshold |
+| 7 — top-K transferability | ❌ ARCHIVE per spec | exact-match **22.7 %** (138/607); spec H10 demanded > 70 % |
+| 8 — granular FundedNext fees | ✅ PASS | post-fee mean_r +1.152 R, fees only 1.2 % of edge |
+
+The raw-panel gate-7 22.7 % matched the operator's pre-registered
+"STOP and report" condition ("top-K agreement 20 %"). Investigation
+(commit pending; `investigation_top_k_divergence_*`) decomposed
+the divergence into three pre-spec hypotheses:
+
+| H | Cause | Confirmed? |
+|---|---|---|
+| H1 | MT5 broker-tz timestamps (21:00/22:00 UTC) vs Yahoo 00:00 UTC labels on BTC/EUR/GBP/XAU | ✅ — 4 of 15 assets misaligned |
+| H2 | Calendar-day asymmetry: Yahoo includes BTC weekends (24/7), MT5 broker treats BTC as Mon-Fri; MT5 has Sunday-evening index opens Yahoo skips | ✅ — BTC: MT5 1512 bars vs Yahoo 2122 bars over the 5.8-y window; indices have inverse skew |
+| H3 | Different price-source streams (Yahoo Coinbase-anchored vs MT5 broker aggregator) | ❌ — no systematic bias; mean diff ≈ 0 across the board, daily abs diff dominated by H1 timestamp offset |
+
+H1 + H2 are pure measurement artefacts. The same `momentum_lookback_days = 126`
+spans **6 calendar months on MT5 BTC** but only **4.1 calendar
+months on Yahoo BTC** because MT5 has fewer per-week bars on a
+24/7 instrument — directly causing K-th-slot ranking flips for
+the most volatile asset of the universe. H3 is consistent with
+"same asset, different snapshot time", not "different underlying
+stream".
+
+**Gates 6/7/8 corrected re-run** (commit pending) under the
+§6.5 alignment protocol:
+
+| Gate | Raw | Corrected | Verdict |
+|---|---:|---:|---|
+| 6 — MT5 sanity (mean R mismatch) | 44.4 % | **18.7 %** | ✅ PASS |
+| 6 — direction agreement | 63.1 % | **87.1 %** | ✅ PASS (> 70 %) |
+| 7 — top-K exact match | 22.7 % | **81.5 %** | ✅ PASS (> 70 %) |
+| 7 — ≥ K-1 overlap | 79.7 % | **99.6 %** | ✅ PASS |
+| 8 — mean R post-fee | +1.152 R | +1.572 R | ✅ PASS (≥ +0.3 R) |
+
+**3/3 PASS post-correction.** The full v1.1 stack — gate 4
+REVIEW + investigation + 20-y walk-forward + operational risk +
+economic simulation + gates 6/7/8 corrected — clears Phase-1
+deployment. Strategy v1.1 PROMOTE.
+
+**Lesson distilled into §6.5**: a pre-frozen H10 threshold
+(top-K > 70 %) was nearly going to archive a strategy whose
+underlying transferability was 81.5 %. The threshold was correct;
+the comparison protocol used to measure against it was buggy.
+Without the §6.5 alignment, the v1.1 verdict would have been
+"5th archive in the strategy-research phase, class non-viable
+footer applies" — overcommitted on a measurement bias. With
+§6.5, future class-B strategies measure transferability on
+calendar-aligned, intersection-only panels and avoid the same
+trap.
+
+**Status**: PROMOTE to gate-9 / Sprint-7 deployment. Implementation
+in `src/strategies/trend_rotation_d1/` stays in the live tree; the
+scheduler integration (replacing or complementing TJR) is the
+operator's next decision.
 
 ### 11.5 Cadence as primary viability filter
 
