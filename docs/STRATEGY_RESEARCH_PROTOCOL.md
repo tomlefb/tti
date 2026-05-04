@@ -137,9 +137,19 @@ gate = stop. Do not proceed to the next gate.** If a gate fails for
 a reason that points to a fixable bug, fix the bug, re-run all prior
 gates that the bug could have invalidated, then continue.
 
+**Pre-spec preparation** (before gate 1, added 2026-05-04 after the
+MR BB H4 v1.1 archive — §11.3 lesson #1):
+
+| # | Step | Deliverable | Why |
+|---|---|---|---|
+| 1.0 | **Cadence pre-measure** on raw triggers (no filters) | `calibration/runs/cadence_premesure_<name>_<TS>.md` | Anchor the spec H1 setups/month band on a *measured* number, not an intuitive guess (§11.2 lesson #1). |
+| 1.5 | **Attrition diagnostic** through the proposed filter chain | `calibration/runs/attrition_diagnostic_<name>_<TS>.md` | Cumulative retention through every spec'd filter, before freezing. Catches "spec geometry produces n_closed << 50 on every cell" *before* gate 4 archives non-informatively (§11.3 lesson #1). The two pre-spec steps together calibrate H1 and ensure the §3.2 grid has at least one admissible cell per instrument. |
+
+Gates 1-9:
+
 | # | Gate | Deliverable | Inputs | Outputs | Pass criteria |
 |---|---|---|---|---|---|
-| 1 | **Specification** | `docs/strategies/<name>.md` | Strategy idea, classification per §2 | Pseudo-code of detector + entry/SL/TP rules; class (HTF/LTF/Hybrid); expected setups/month and Mean R | Reviewer can implement it without ambiguity |
+| 1 | **Specification** | `docs/strategies/<name>.md` | Strategy idea, classification per §2; cadence + attrition outputs from steps 1.0 / 1.5 | Pseudo-code of detector + entry/SL/TP rules; class (HTF/LTF/Hybrid); expected setups/month and Mean R | Reviewer can implement it without ambiguity |
 | 2 | **Implementation** | `src/strategies/<name>/` + `tests/strategies/test_<name>.py` | Spec | Module + ≥ 1 unit test per detector branch | All unit tests green; type-checks pass |
 | 3 | **Audit (look-ahead)** | `calibration/audit_<name>.py` | Implementation | Setup list when running streaming vs full-history modes | **100 % bit-identical**; not 99 % |
 | 4 | **Backtest Duk** | `calibration/runs/<date>_<name>_duk.md` + JSON | Implementation, Dukascopy 5–10 y M5 + tick | `BacktestResult` per instrument | See §5 admission criteria |
@@ -208,9 +218,25 @@ to gate 7's outcome.)
 
 ## 6. Methodological pitfalls — operational checklist
 
-Each pitfall below was paid for in time during the TJR pilot. Re-read
-this list at gate 3 and gate 4.
+Each pitfall below was paid for in time during the TJR pilot or a
+later archive (referenced inline). Re-read this list at gates 1
+(spec freeze), 3 (audit) and 4 (backtest).
 
+- [ ] **Pre-spec attrition blind spot** (§11.3 lesson, MR BB H4
+      v1.1): the cadence pre-measure (§4 step 1.0) only counts raw
+      triggers; the cumulative retention through every spec'd
+      filter can be 100× tighter than the intuitive estimate that
+      anchors H1. **Always run the attrition diagnostic (§4 step
+      1.5) BEFORE freezing the spec.** A v1.0 that ships without
+      this measurement risks gate 4 archiving for *cause of n*
+      rather than cause of edge — a non-informative outcome.
+- [ ] **Win rate ≈ RR breakeven is a chop fingerprint, regardless
+      of strategy direction** (§11.2 + §11.3 lessons). Trend-
+      following at RR 2.0 → breakeven 33.3 %; mean-reversion at
+      RR 1.0 → breakeven 50 %. If the train grid produces win
+      rates landing within ±5 pp of the implied breakeven on
+      every cell, the strategy doesn't time entries better than
+      chance — archive precociously.
 - [ ] **Detector look-ahead**: forward iteration on FVG / sweep / swing /
       MSS. Audit at gate 3 must be 100 % bit-identical.
 - [ ] **Broker timezone bug**: MT5 broker times are Athens (EET/EEST)
