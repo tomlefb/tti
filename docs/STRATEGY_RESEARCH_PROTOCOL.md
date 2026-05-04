@@ -200,6 +200,71 @@ binary is unchanged. A revised verdict (commit to follow) is then
 a class-corrected reading of the same train grid, not a
 post-hoc rescue of the earlier outcome.
 
+### 3.6 Operator viability constraint — minimum cadence
+
+(Added 2026-05-04 after the trend-rotation D1 v1.0 holdout
+re-evaluation under §3.5 produced a 1.31 trades/mo cadence on the
+selected cell — see §11.4 final verdict and §11.5 transversal
+lesson.)
+
+En complément des floors statistiques §3–3.5, toute stratégie
+doit respecter un floor opérationnel minimal:
+
+(a) **Floor cadence**: 4 trades/mois portfolio minimum sur la
+    fenêtre holdout.
+
+(b) **Floor distribution**: les trades doivent être distribués
+    sur 3+ semaines distinctes du mois moyen. Une stratégie qui
+    produit 4 trades en 1 jour puis rien pendant 4 semaines ne
+    satisfait pas ce critère, parce que statistiquement ces 4
+    trades mesurent un seul événement.
+
+**Justification**:
+
+(i) Pour que les performances mesurées soient statistiquement
+    représentatives sur des fenêtres courtes (1–3 mois live), il
+    faut un sample-size minimal mensuel. À 1–2 trades/mois, une
+    mauvaise séquence de 2–3 mois (très probable par variance pure)
+    peut faire descendre le compte sous le drawdown limit de la
+    phase de challenge.
+
+(ii) Pour FundedNext Stellar Lite Phase 1: 5K capital, drawdown
+     journalier 4 %, drawdown total 8 %. Une stratégie à 1 trade/mois
+     avec mean R apparent +0.5 mais variance per-trade σ = 2R peut
+     faire 3 mois consécutifs négatifs avec probabilité non-
+     négligeable, busting la phase avant que l'edge ne se manifeste.
+
+(iii) L'opérateur a besoin d'un feedback loop régulier pour ajuster
+      comportement et règles. À 1 trade/mois, il faut 6 mois pour
+      avoir 6 datapoints; à 4–5 trades/mois, ce sont 6 semaines.
+
+**Application**:
+
+Le critère §3.6 est checké en pre-measure §1.0 AVANT spec, sur le
+grid candidat. Une classe de stratégies dont aucune cellule viable
+ne dépasse 4 trades/mois portfolio est éliminée du backlog avant
+spec.
+
+Les classes structurellement éliminées par §3.6:
+
+- HTF cross-sectional momentum multi-asset à rebalance ≥ 10 j
+  (`trend_rotation_d1` v1, archived).
+- HTF macro/carry multi-asset à rebalance mensuel ou supérieur.
+
+Les classes qui passent §3.6 par construction:
+
+- HTF single-asset wick-sensitive à 8–15 setups/mo/instrument
+  (univers 5+ → 40+/mo).
+- LTF single-asset (M5 / M15).
+- HTF cross-sectional rotation à rebalance ≤ 7 j et K ≥ 4.
+
+**Universal applicability**. §3.6 applies to **any** strategy
+class, not only the cross-sectional momentum class that motivated
+it. The pre-measure §1.0 step now reports both a raw-trigger
+cadence and a §3.6 portfolio-cadence projection per candidate
+grid cell. A spec is admissible only if at least one cell of its
+§3.2 grid satisfies §3.6 by construction.
+
 ---
 
 ## 4. The 7-gate pipeline
@@ -627,11 +692,40 @@ documents the modification log pattern for future iterations.
 
 ### 11.4 trend_rotation_d1 v1: archive with a different signature
 
-**Status**: technical archive after gate 4 (commit `c2ddce2`,
-2026-05-04) under the §5.2 standard floors; revised verdict
-under §3.5 class-adapted floors documented in commits to follow.
-Spec, postmortem, and README to live under
-`archived/strategies/trend_rotation_d1_v1/`.
+**Final verdict trend_rotation_d1 v1: ARCHIVE — cadence
+insufficient.**
+
+The selected cell (mom = 126, K = 3, rebal = 10) produced
+1.31 trades/mo on holdout, which is 3× below the operator
+viability floor §3.6 (4 trades/mo minimum, distributed across 3+
+weeks).
+
+This verdict supersedes the original "REVIEW (5/9 hypotheses
+PASS)" assessment from gate 4. The hypotheses-PASS verdict was
+mathematically valid but operationally meaningless: a strategy
+that doesn't produce enough trades cannot be deployed, regardless
+of mean R magnitude.
+
+The +84 % projected annual return on holdout (n = 21) was not
+discounted as régime-fit per se, but as structurally non-actionable
+on this cadence. Even if the edge is real, 1–2 trades/mo cannot be
+deployed on a 5K Phase 1 challenge with daily/total drawdown
+limits.
+
+A v1.1 with cadence-oriented parameter expansion (rebalance ≤ 7 d,
+K = 4–5) is being explored to preserve potential edge while
+satisfying §3.6. Modification documented in the
+`trend_rotation_d1_v1.1` spec, frozen before re-run per §11.3 #3
+pattern.
+
+---
+
+**Status (technical history)**: technical archive after gate 4
+(commit `c2ddce2`, 2026-05-04) under the §5.2 standard floors;
+class-adapted re-evaluation under §3.5 documented in commits
+`e36ab00` / `e5fc221` / `411aa89`; final ARCHIVE verdict on §3.6
+cadence-floor recorded by this commit. Spec, postmortem, and
+README to live under `archived/strategies/trend_rotation_d1_v1/`.
 
 **Failure step (under §5.2 standards)**: gate 4 train calibration.
 Across the 8 cells of the §3.2 grid, **zero** cleared the
@@ -710,8 +804,49 @@ class explicitly. The class determines which §3 / §3.5 floors
 apply at gate 4 and which H8 threshold applies in the §4
 holdout evaluation.
 
+### 11.5 Cadence as primary viability filter
+
+(Added 2026-05-04 alongside §3.6 — this section captures the
+transversal lesson distilled from the 4-strategy archive sequence.)
+
+Pre-measure cadence §1.0 must check §3.6 floor BEFORE spec
+finalisation. The 4-strategy archive sequence revealed that
+cadence-floor failure was the binding constraint on 1 of the 4
+archives (`trend_rotation_d1` v1). The other three (TJR §11.1,
+breakout-retest H4 §11.2, mean-reversion BB H4 §11.3) all
+satisfied cadence by construction; their archive drivers were
+edge-related (chop fingerprint, look-ahead leaks, regime-fit),
+not cadence.
+
+**Lesson**: in any future strategy backlog, the first triage
+question is "Does the class structurally produce ≥ 4 trades/mo
+portfolio?". Classes that fail this test are eliminated from the
+backlog before any spec work.
+
+**Applied to current backlog** (post-§11.4 archive):
+
+- ✅ **HTF single-asset wick-sensitive variants** (structure
+  breaks H1, OB H4, FVG mitigation H4, etc.) — passes by
+  construction. Univers ≥ 5 instruments × 8–15 setups/mo each.
+- ✅ **LTF single-asset (M5 / M15)** — passes by construction
+  (with Duk-MT5 transferability concerns documented separately
+  per §1 / §2).
+- ❌ **HTF cross-sectional rotation rebalance ≥ 10 j** —
+  eliminated. `trend_rotation_d1` v1 archive is the worked
+  example.
+- ⚠️ **HTF cross-sectional rotation rebalance ≤ 7 j** — needs
+  §3.6 pre-measure verification per cell. Explored in
+  `trend_rotation_d1_v1.1`.
+
+**Operational implication**: the pre-measure step §1.0 template
+now emits two numbers — raw trigger cadence (anchors H1) AND
+projected portfolio cadence at the spec's §3.2 default operating
+point (gate-checks §3.6). A spec whose default cell projects
+< 4 trades/mo portfolio cannot be frozen as-is.
+
 ---
 
-*Last revised: 2026-05-04 (fourth strategy archived; §3.5 +
-§11.4 + §11.4.1 added). Update on every strategy archive —
-archived strategies' "Transferable learnings" feed back here.*
+*Last revised: 2026-05-04 (fourth strategy ARCHIVE finalised on
+cadence floor; §3.6 + §11.4 final-verdict preamble + §11.5
+added). Update on every strategy archive — archived strategies'
+"Transferable learnings" feed back here.*
