@@ -366,6 +366,88 @@ LIFECYCLE_CHECK_INTERVAL_SEC = 30
 KILL_SWITCH_PATH = "KILL_SWITCH"
 
 # -----------------------------------------------------------------------------
+# Active strategy selector
+# -----------------------------------------------------------------------------
+# The scheduler chooses which job graph to register based on this key.
+#
+#   "tjr"               — legacy killzone-driven HTF wick-sensitive setups.
+#                         Uses the full TJR job graph (detection cycles per
+#                         killzone, lifecycle polling, end-of-killzone cleanup,
+#                         pre-killzone bias, killzone heartbeats, outcome
+#                         reconciliation). MAGIC_NUMBER = 7766.
+#
+#   "trend_rotation_d1" — cross-sectional momentum rotation D1 (v1.1, gates
+#                         6/7/8 PASS as of 2026-05-05). Uses ONE job per
+#                         weekday at the configured Paris-local D1-close
+#                         hour. No killzones, no per-trade lifecycle
+#                         (rotation has no SL/TP), no cleanup. Magic number
+#                         from ROTATION_MAGIC_NUMBER below — distinct from
+#                         7766 so the two strategies' positions never alias.
+#
+# When switching strategies, set this key, restart the scheduler, and the
+# new job graph takes effect on the next trigger.
+ACTIVE_STRATEGY = "tjr"
+
+# -----------------------------------------------------------------------------
+# Rotation strategy — trend_rotation_d1 v1.1 cell 126/5/3
+# -----------------------------------------------------------------------------
+# Read only when ACTIVE_STRATEGY == "trend_rotation_d1". Cell parameters are
+# the gate-4-v1.1 selected values (commit efe599e); see
+# docs/strategies/trend_rotation_d1_v1_1.md and protocol §11.4.2 for the
+# admission story. Adjust only after a fresh gate-4 grid + admission run.
+
+# Universe — 15-asset validated portfolio. Symbols must match the broker's
+# MT5 names exactly; if your broker exposes "BTC.cash" instead of "BTCUSD",
+# rewrite here.
+ROTATION_UNIVERSE = (
+    "NDX100", "SPX500", "US30", "US2000",
+    "GER30", "UK100", "JP225",
+    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD",
+    "XAUUSD", "XAGUSD",
+    "USOUSD",
+    "BTCUSD",
+)
+
+# Cell 126/5/3 — momentum_lookback / K / rebalance_days.
+ROTATION_MOMENTUM_LOOKBACK_DAYS = 126
+ROTATION_K = 5
+ROTATION_REBALANCE_DAYS = 5  # operator override — spec §3.2 cell value is 3
+ROTATION_ATR_PERIOD = 20
+
+# Cron — runs once per weekday at this Paris-local time. 23:00 sits past
+# every covered market close (US after-hours irrelevant — we trade the D1
+# close, not extended hours), so the panel feed is settled before the
+# rebalance fires.
+ROTATION_CRON_HOUR_PARIS = 23
+ROTATION_CRON_MINUTE_PARIS = 0
+
+# Magic number for rotation positions — isolates them from the legacy TJR
+# magic 7766 in MT5 logs and recovery / lifecycle filters.
+ROTATION_MAGIC_NUMBER = 7799
+
+# Adaptive risk schedule — spec §3.1 default is 1 % per trade; the live
+# Phase-1 ramp-up uses 0.5 % until balance recovers above the floor below.
+# At balance >= ROTATION_CAPITAL_FLOOR_FOR_FULL_RISK_USD, the system
+# auto-promotes to ROTATION_RISK_PER_TRADE_FULL_PCT. The two rates and the
+# breakpoint are surfaced as settings so the same code handles the ramp
+# and the steady state.
+ROTATION_RISK_PER_TRADE_FULL_PCT = 0.01     # 1 %
+ROTATION_RISK_PER_TRADE_REDUCED_PCT = 0.005  # 0.5 %
+ROTATION_CAPITAL_FLOOR_FOR_FULL_RISK_USD = 4950.0
+
+# Capital safety floor — block any new entry when account balance drops
+# below this number. Existing positions are NOT closed; only new opens
+# are paused until manual review. Distinct from the daily-loss circuit
+# breaker, which is a hard FundedNext rule limit.
+ROTATION_CAPITAL_FLOOR_USD = 4500.0
+
+# Daily-loss limit (USD). Used by the rotation pre-rebalance gate. Set
+# below the FundedNext daily DD wall ($200 nominal on a $5K Phase 1) by
+# a safety margin (operator default $150 = 75 % of $200) so the soft
+# warning fires before the hard wall.
+DAILY_LOSS_LIMIT_USD = 150.0
+
+# -----------------------------------------------------------------------------
 # Logging
 # -----------------------------------------------------------------------------
 
