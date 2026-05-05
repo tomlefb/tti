@@ -35,7 +35,10 @@ from src.execution.position_lifecycle import (
     check_open_positions,
     end_of_killzone_cleanup,
 )
-from src.execution.recovery import reconcile_orphan_positions
+from src.execution.recovery import (
+    reconcile_orphan_positions,
+    reconcile_rotation_orphan_positions,
+)
 from src.journal.db import get_engine, init_db, session_scope
 from src.journal.repository import get_decision, get_setup, insert_decision
 from src.mt5_client.client import MT5Client
@@ -138,8 +141,10 @@ async def _amain(settings: ModuleType) -> None:
         f"✅ Scheduler started — strategy={active_strategy}, mode={mode_label}."
     )
 
-    # Sprint 7: orphan / lost-order reconciliation on startup. Idempotent
-    # so a crash-restart loop does not amplify side effects.
+    # Sprint 7: TJR orphan / lost-order reconciliation on startup.
+    # Idempotent so a crash-restart loop does not amplify side effects.
+    # Always runs (covers any leftover TJR magic 7766 positions even when
+    # the active strategy is now rotation).
     try:
         reconcile_orphan_positions(
             mt5_client=mt5,
@@ -151,8 +156,42 @@ async def _amain(settings: ModuleType) -> None:
     except Exception:  # noqa: BLE001
         logger.exception("startup reconciliation raised — proceeding anyway")
 
-    # Scheduler
+    # Scheduler — created BEFORE the rotation-recovery gate so the early
+    # shutdown path can pass it to ``_await_shutdown``. The scheduler
+    # has no jobs yet, so .shutdown() on an unstarted scheduler is a no-op.
     scheduler = AsyncIOScheduler(timezone=_TZ_PARIS)
+
+    # Stage 3: rotation orphan / ghost reconciliation. Only runs when the
+    # active strategy is rotation, since the TJR pass above already
+    # covered magic 7766. A failure here BLOCKS job registration — we
+    # refuse to fire rotation cycles against an unknown MT5 state.
+    if active_strategy == "trend_rotation_d1":
+        try:
+            rotation_recovery = reconcile_rotation_orphan_positions(
+                mt5_client=mt5,
+                journal_session_factory=session_factory,
+                settings=settings,
+                now_utc=datetime.now(UTC),
+                notifier=notifier,
+            )
+            if rotation_recovery.errors:
+                msg = (
+                    f"🚨 Rotation recovery encountered "
+                    f"{len(rotation_recovery.errors)} error(s) — refusing to "
+                    f"register rotation jobs. First: {rotation_recovery.errors[0]}"
+                )
+                logger.critical(msg)
+                await notifier.send_error(msg)
+                await _await_shutdown(notifier, scheduler, mt5)
+                return
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("rotation recovery raised — refusing to register jobs")
+            await notifier.send_error(
+                f"🚨 Rotation recovery raised ({exc!r}) — jobs NOT registered. "
+                f"Manual review required."
+            )
+            await _await_shutdown(notifier, scheduler, mt5)
+            return
 
     # ------------------------------------------------------------------
     # Rotation strategy registration (trend_rotation_d1).
