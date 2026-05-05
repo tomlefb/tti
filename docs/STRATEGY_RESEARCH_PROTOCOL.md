@@ -944,6 +944,31 @@ in `src/strategies/trend_rotation_d1/` stays in the live tree; the
 scheduler integration (replacing or complementing TJR) is the
 operator's next decision.
 
+**Live deployment 2026-05-05**: scheduler launched with `ACTIVE_STRATEGY
+= "trend_rotation_d1"`, `AUTO_TRADING_ENABLED = True`, magic 7799,
+cron 23:00 Paris weekdays. Initial config used the adaptive risk
+schedule (0.5 % when capital < $4,950; 1 % otherwise) as a defensive
+ramp-up, with first cycle expected to fire at 0.5 % given starting
+balance $4,843.26.
+
+**Live deployment 2026-05-05 (later that day)**: switched to constant
+1 % per trade. The operator reassessed the account constraints — daily
+$200 wall, cumulative loss $156.74 over the prior two months, $243.26
+of margin remaining before bust — and accepted the higher per-trade
+risk per the economic simulation scenario A baseline (commit
+`9dac82c`, "PROFITABLE CONVAINCANT" verdict). Implementation: set
+`ROTATION_RISK_PER_TRADE_REDUCED_PCT = 0.01` (was 0.005) so both
+branches of `adaptive_risk_per_trade_pct` return 1 %; the function
+itself is unchanged and its tests still cover both branches. If the
+account busts, the operator buys a fresh Phase 1 Stellar Lite and
+re-deploys at the same 1 % constant. The capital floor (4500) and
+daily-loss limit (150) safety belts stay engaged either way.
+
+**Future risk-schedule changes**: re-evaluate after ~25-30 cumulative
+live trades or after one bust cycle, whichever comes first. The
+expected wallclock for that sample size is 6-8 months at the 5-day
+rebalance cadence × ~2-3 transitions per rebalance.
+
 ### 11.5 Cadence as primary viability filter
 
 (Added 2026-05-04 alongside §3.6 — this section captures the
