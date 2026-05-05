@@ -735,9 +735,9 @@ def run_rotation_cycle(
     except Exception as exc:  # noqa: BLE001
         logger.exception("rotation cycle: get_account_info failed")
         report.skipped_reason = "account_info_unavailable"
-        _run_async(notifier.send_error(
+        notifier.send_html_threadsafe(
             format_rebalance_error_message(strategy=strategy, error=repr(exc))
-        ))
+        )
         return report
 
     capital = float(account.balance)
@@ -784,7 +784,7 @@ def run_rotation_cycle(
             )
         else:
             text = format_killswitch_triggered_message(reason=reason, capital_usd=capital)
-        _run_async(notifier.send_error(text))
+        notifier.send_html_threadsafe(text)
         return report
 
     # ---- 3. Read persisted state ----
@@ -956,9 +956,9 @@ def run_rotation_cycle(
         )
 
     # ---- 10. Notify "scheduled" ----
-    _run_async(notifier.send_text(
+    notifier.send_html_threadsafe(
         format_rebalance_scheduled_message(timestamp_utc=now_utc, strategy=strategy)
-    ))
+    )
 
     # ---- 11. Execute and notify "executed" ----
     try:
@@ -974,9 +974,9 @@ def run_rotation_cycle(
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("rotation cycle: execute_rebalance_transitions raised")
-        _run_async(notifier.send_error(
+        notifier.send_html_threadsafe(
             format_rebalance_error_message(strategy=strategy, error=repr(exc))
-        ))
+        )
         report.skipped_reason = "execute_exception"
         return report
 
@@ -986,7 +986,7 @@ def run_rotation_cycle(
     report.opens_succeeded = result.n_opened_ok
     report.opens_failed = result.n_opened_failed
 
-    _run_async(notifier.send_text(
+    notifier.send_html_threadsafe(
         format_rebalance_executed_message(
             timestamp_utc=now_utc, strategy=strategy,
             closed_assets=sorted(closed_set),
@@ -994,7 +994,7 @@ def run_rotation_cycle(
             basket_after=sorted(new_basket),
             capital_usd=capital, risk_pct=risk_pct,
         )
-    ))
+    )
     logger.info(
         "rotation cycle fired: closed=%s opened=%s (closes %d/%d ok, opens %d/%d ok)",
         sorted(closed_set), sorted(opened_set),

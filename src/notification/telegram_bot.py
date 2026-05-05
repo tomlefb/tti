@@ -90,6 +90,10 @@ class TelegramNotifier:
         self._application: Application = Application.builder().token(bot_token).build()
         self._application.add_handler(CallbackQueryHandler(self._handle_callback_query))
         self._started = False
+        # Captured at ``start_polling`` so worker-thread sends can schedule
+        # coroutines back onto the polling loop via run_coroutine_threadsafe
+        # — see ``send_html_threadsafe``.
+        self._main_loop: asyncio.AbstractEventLoop | None = None
 
     # -----------------------------------------------------------------
     # Public API
@@ -173,6 +177,10 @@ class TelegramNotifier:
         Used by the scheduler for heartbeats and error alerts. A failure
         is logged but not raised — the scheduler can survive a
         Telegram-down moment.
+
+        Pass ``parse_mode="HTML"`` to render ``<b>``, ``<code>``, etc.
+        Templates in :mod:`src.notification.message_formatter` produce
+        HTML and rely on this — callers MUST pass parse_mode for those.
         """
         try:
             await self._application.bot.send_message(
@@ -185,9 +193,52 @@ class TelegramNotifier:
             return False
         return True
 
-    async def send_error(self, text: str) -> bool:
-        """Send an error/critical alert. Thin wrapper around ``send_text``."""
-        return await self.send_text(text)
+    async def send_error(self, text: str, *, parse_mode: str | None = None) -> bool:
+        """Send an error/critical alert. Thin wrapper around ``send_text``.
+
+        Same parse_mode contract as ``send_text`` — pass ``"HTML"`` if
+        the message body contains HTML markup.
+        """
+        return await self.send_text(text, parse_mode=parse_mode)
+
+    def send_html_threadsafe(self, html: str) -> None:
+        """Send an HTML-formatted message from any thread / executor.
+
+        Combines two fixes that were exposed by the rotation cycle's
+        first live run (2026-05-05 23:00 UTC+2):
+
+        - **parse_mode**: forces ``"HTML"`` so the
+          ``message_formatter`` templates render correctly. The bare
+          ``send_text(...)`` was used without parse_mode and produced
+          literal ``<b>...</b>`` text in Telegram.
+
+        - **thread / loop safety**: APScheduler runs sync jobs in a
+          worker thread that has no event loop. The previous pattern
+          (``asyncio.run(coro)``) created a fresh loop per call, but
+          the python-telegram-bot HTTPX transport persists across
+          calls and binds to the FIRST loop it sees — so the second
+          ``asyncio.run`` saw "Event loop is closed". Schedule on the
+          main loop captured at ``start_polling`` time instead.
+        """
+        coro = self.send_text(html, parse_mode="HTML")
+        loop = self._main_loop
+        if loop is not None and not loop.is_closed():
+            try:
+                asyncio.run_coroutine_threadsafe(coro, loop)
+                return
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "run_coroutine_threadsafe failed — falling back to inline drive"
+                )
+        # Fallback: the polling loop isn't running yet (tests / dry-run).
+        try:
+            asyncio.get_running_loop()
+            asyncio.ensure_future(coro)
+        except RuntimeError:
+            try:
+                asyncio.run(coro)
+            except Exception:  # noqa: BLE001
+                logger.exception("send_html_threadsafe inline-drive failed")
 
     # -----------------------------------------------------------------
     # Sprint 7 — auto-execution lifecycle hooks
@@ -296,6 +347,11 @@ class TelegramNotifier:
         await self._application.initialize()
         await self._application.start()
         await self._application.updater.start_polling()
+        # Capture the main event loop so worker-thread sends can schedule
+        # back onto it via ``send_html_threadsafe``. Without this, sync
+        # jobs running in APScheduler's executor would see "Event loop
+        # is closed" on the second ``asyncio.run`` of the same cycle.
+        self._main_loop = asyncio.get_running_loop()
         self._started = True
         logger.info("Telegram polling started")
 
