@@ -347,3 +347,111 @@ def test_format_includes_bias_swept_poi_and_confluences() -> None:
     assert "structural_sweep" in msg
     assert "FVG+OB" in msg
     assert "high_rr_runner" in msg
+
+
+# -----------------------------------------------------------------------------
+# Rotation strategy message templates
+# -----------------------------------------------------------------------------
+
+
+def test_format_rebalance_scheduled_includes_strategy_and_time():
+    from src.notification.message_formatter import format_rebalance_scheduled_message
+
+    ts = datetime(2026, 5, 5, 21, 0, tzinfo=UTC)
+    msg = format_rebalance_scheduled_message(
+        timestamp_utc=ts, strategy="trend_rotation_d1"
+    )
+    assert "Rebalance scheduled" in msg
+    assert "trend_rotation_d1" in msg
+    assert "21:00" in msg  # UTC timestamp
+    assert "Paris" in msg
+
+
+def test_format_rebalance_executed_lists_closed_opened_basket():
+    from src.notification.message_formatter import format_rebalance_executed_message
+
+    msg = format_rebalance_executed_message(
+        timestamp_utc=datetime(2026, 5, 5, 21, 0, tzinfo=UTC),
+        strategy="trend_rotation_d1",
+        closed_assets=["NDX100"],
+        opened_assets=["BTCUSD", "GER30"],
+        basket_after=["BTCUSD", "GER30", "XAUUSD"],
+        capital_usd=4850.0,
+        risk_pct=0.005,
+    )
+    assert "Rebalance executed" in msg
+    assert "trend_rotation_d1" in msg
+    assert "NDX100" in msg
+    assert "BTCUSD" in msg
+    assert "GER30" in msg
+    assert "XAUUSD" in msg
+    assert "$4,850" in msg
+    assert "0.50%" in msg
+
+
+def test_format_rebalance_executed_handles_empty_lists():
+    from src.notification.message_formatter import format_rebalance_executed_message
+
+    msg = format_rebalance_executed_message(
+        timestamp_utc=datetime(2026, 5, 5, 21, 0, tzinfo=UTC),
+        strategy="trend_rotation_d1",
+        closed_assets=[],
+        opened_assets=[],
+        basket_after=[],
+        capital_usd=4850.0,
+        risk_pct=0.01,
+    )
+    # Empty lists rendered as "—" not as empty string.
+    assert "<b>Closed:</b> —" in msg
+    assert "<b>Opened:</b> —" in msg
+    assert "<b>Basket:</b> —" in msg
+
+
+def test_format_rebalance_error_truncates_long_traceback():
+    from src.notification.message_formatter import format_rebalance_error_message
+
+    long_err = "ValueError: " + "x" * 1000
+    msg = format_rebalance_error_message(strategy="trend_rotation_d1", error=long_err)
+    assert "Rebalance error" in msg
+    assert "trend_rotation_d1" in msg
+    # Truncated to ~300 chars so Telegram's 4096 limit is never threatened.
+    assert len(msg) < 600
+
+
+def test_format_daily_dd_warning_includes_pnl_limit_capital():
+    from src.notification.message_formatter import format_daily_dd_warning_message
+
+    msg = format_daily_dd_warning_message(
+        daily_pnl_usd=-150.0,
+        daily_limit_usd=200.0,
+        capital_usd=4700.0,
+    )
+    assert "Daily DD warning" in msg
+    assert "-150" in msg or "-150.00" in msg
+    assert "200" in msg
+    assert "$4,700" in msg
+    assert "75 %" in msg or "75%" in msg
+
+
+def test_format_killswitch_includes_reason_and_capital():
+    from src.notification.message_formatter import format_killswitch_triggered_message
+
+    msg = format_killswitch_triggered_message(
+        reason="capital_below_safe_threshold", capital_usd=4400.0
+    )
+    assert "Killswitch" in msg
+    assert "capital_below_safe_threshold" in msg
+    assert "$4,400" in msg
+
+
+def test_format_capital_below_threshold_renders_floor_and_capital():
+    from src.notification.message_formatter import (
+        format_capital_below_threshold_message,
+    )
+
+    msg = format_capital_below_threshold_message(
+        capital_usd=4400.0, threshold_usd=4500.0
+    )
+    assert "Capital below safe threshold" in msg
+    assert "$4,400" in msg
+    assert "$4,500" in msg

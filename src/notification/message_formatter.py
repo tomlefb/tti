@@ -22,6 +22,7 @@ Format conventions (per Sprint 4 spec):
 
 from __future__ import annotations
 
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from src.detection.setup import Setup
@@ -225,4 +226,108 @@ def format_orphan_alert_message(
         f"Symbol: {symbol}, Ticket: {ticket}, Volume: {volume:.2f}\n"
         f"This position was open with our magic number but not in the journal. "
         f"Closed at market for safety. Investigate before restart."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rotation strategy — basket lifecycle templates
+# ---------------------------------------------------------------------------
+
+
+def format_rebalance_scheduled_message(
+    *, timestamp_utc: datetime, strategy: str
+) -> str:
+    """Sent at the start of a rebalance cycle, before any orders."""
+    ts_paris = timestamp_utc.astimezone(_TZ_PARIS)
+    return (
+        f"🔄 <b>Rebalance scheduled</b>\n"
+        f"Strategy: <code>{strategy}</code>\n"
+        f"Time: {timestamp_utc.strftime('%Y-%m-%d %H:%M')} UTC "
+        f"(Paris: {ts_paris.strftime('%H:%M')})\n"
+        f"Computing top-K basket…"
+    )
+
+
+def format_rebalance_executed_message(
+    *,
+    timestamp_utc: datetime,
+    strategy: str,
+    closed_assets: list[str],
+    opened_assets: list[str],
+    basket_after: list[str],
+    capital_usd: float,
+    risk_pct: float,
+) -> str:
+    """Sent after a rebalance has finished placing orders.
+
+    Shows what closed, what opened, the new basket composition, and the
+    risk-per-trade rate that was applied (so the operator can verify the
+    adaptive 0.5 % / 1 % schedule fired as expected).
+    """
+    ts_paris = timestamp_utc.astimezone(_TZ_PARIS)
+    closed_str = ", ".join(closed_assets) if closed_assets else "—"
+    opened_str = ", ".join(opened_assets) if opened_assets else "—"
+    basket_str = ", ".join(basket_after) if basket_after else "—"
+    return (
+        f"✅ <b>Rebalance executed</b>\n"
+        f"<code>{strategy}</code> @ {timestamp_utc.strftime('%Y-%m-%d %H:%M')} UTC "
+        f"(Paris: {ts_paris.strftime('%H:%M')})\n"
+        f"<b>Closed:</b> {closed_str}\n"
+        f"<b>Opened:</b> {opened_str}\n"
+        f"<b>Basket:</b> {basket_str}\n"
+        f"<b>Capital:</b> ${capital_usd:,.2f} | Risk/trade: {risk_pct:.2%}"
+    )
+
+
+def format_rebalance_error_message(*, strategy: str, error: str) -> str:
+    """Sent when the rebalance cycle raises mid-execution.
+
+    The message is deliberately terse — full traceback goes to logs;
+    Telegram gets just enough for the operator to know to look."""
+    return (
+        f"⚠️ <b>Rebalance error</b>\n"
+        f"Strategy: <code>{strategy}</code>\n"
+        f"Error: <code>{error[:300]}</code>\n"
+        f"Check logs and consider triggering KILL_SWITCH."
+    )
+
+
+def format_daily_dd_warning_message(
+    *,
+    daily_pnl_usd: float,
+    daily_limit_usd: float,
+    capital_usd: float,
+) -> str:
+    """Sent when daily P&L crosses the soft-warning threshold (75 % of limit).
+
+    Hard stop fires separately — this is the heads-up before."""
+    pct = abs(daily_pnl_usd) / abs(daily_limit_usd) * 100.0 if daily_limit_usd else 0.0
+    return (
+        f"⚠️ <b>Daily DD warning</b>\n"
+        f"Daily P&L: ${daily_pnl_usd:+,.2f} "
+        f"({pct:.0f} % of ${daily_limit_usd:,.0f} limit)\n"
+        f"Current capital: ${capital_usd:,.2f}\n"
+        f"Auto-trading remains active; new positions blocked at 100 %."
+    )
+
+
+def format_killswitch_triggered_message(*, reason: str, capital_usd: float) -> str:
+    """Sent when the rotation cycle aborts on a killswitch / safety check."""
+    return (
+        f"🛑 <b>Killswitch triggered</b>\n"
+        f"Reason: <code>{reason}</code>\n"
+        f"Capital: ${capital_usd:,.2f}\n"
+        f"No new positions will be opened until the condition clears."
+    )
+
+
+def format_capital_below_threshold_message(
+    *, capital_usd: float, threshold_usd: float
+) -> str:
+    """Sent when account balance falls below the safe-minimum floor."""
+    return (
+        f"🚨 <b>Capital below safe threshold</b>\n"
+        f"Capital: ${capital_usd:,.2f} (floor: ${threshold_usd:,.2f})\n"
+        f"All new entries paused. Existing positions left untouched.\n"
+        f"Manual review required before re-enabling."
     )
