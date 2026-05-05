@@ -425,14 +425,29 @@ ROTATION_CRON_MINUTE_PARIS = 0
 # magic 7766 in MT5 logs and recovery / lifecycle filters.
 ROTATION_MAGIC_NUMBER = 7799
 
-# Adaptive risk schedule — spec §3.1 default is 1 % per trade; the live
-# Phase-1 ramp-up uses 0.5 % until balance recovers above the floor below.
-# At balance >= ROTATION_CAPITAL_FLOOR_FOR_FULL_RISK_USD, the system
-# auto-promotes to ROTATION_RISK_PER_TRADE_FULL_PCT. The two rates and the
-# breakpoint are surfaced as settings so the same code handles the ramp
-# and the steady state.
-ROTATION_RISK_PER_TRADE_FULL_PCT = 0.01     # 1 %
-ROTATION_RISK_PER_TRADE_REDUCED_PCT = 0.005  # 0.5 %
+# Risk schedule. ``adaptive_risk_per_trade_pct`` returns FULL when
+# capital >= floor, REDUCED otherwise. Two operating modes:
+#
+#   (a) Defensive ramp-up (spec §3.1 default) — 0.5 % below the floor,
+#       1 % above. Use when the account is tight (cumulative DD eating
+#       into the margin allowance) so the cycle de-risks until equity
+#       recovers.
+#         ROTATION_RISK_PER_TRADE_FULL_PCT = 0.01
+#         ROTATION_RISK_PER_TRADE_REDUCED_PCT = 0.005
+#
+#   (b) Constant 1 % — set both rates to 0.01 (effectively disables the
+#       ramp). Cohérent with economic simulation scenario A "PROFITABLE
+#       CONVAINCANT" (commit 9dac82c). Use when the operator has decided
+#       to accept the higher risk and is willing to re-buy a Phase 1 if
+#       the current account busts. This is the live deployment default
+#       as of 2026-05-05.
+#         ROTATION_RISK_PER_TRADE_FULL_PCT = 0.01
+#         ROTATION_RISK_PER_TRADE_REDUCED_PCT = 0.01
+#
+# To switch back to defensive: set REDUCED to 0.005 and restart the
+# scheduler. The capital floor value stays as documentation either way.
+ROTATION_RISK_PER_TRADE_FULL_PCT = 0.01
+ROTATION_RISK_PER_TRADE_REDUCED_PCT = 0.01
 ROTATION_CAPITAL_FLOOR_FOR_FULL_RISK_USD = 4950.0
 
 # Capital safety floor — block any new entry when account balance drops
