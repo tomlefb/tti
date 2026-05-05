@@ -45,6 +45,7 @@ from src.scheduler.jobs import (
     run_detection_cycle,
     run_outcome_reconciliation,
     run_pre_killzone_bias,
+    run_rotation_cycle,
     send_killzone_close_heartbeat,
     send_killzone_open_heartbeat,
 )
@@ -131,8 +132,11 @@ async def _amain(settings: ModuleType) -> None:
     await notifier.start_polling()
 
     auto_trading = bool(getattr(settings, "AUTO_TRADING_ENABLED", False))
-    mode_label = "auto-execution (demo)" if auto_trading else "notifications-only"
-    await notifier.send_text(f"✅ TJR scheduler started — {mode_label}.")
+    active_strategy = str(getattr(settings, "ACTIVE_STRATEGY", "tjr")).lower()
+    mode_label = "auto-execution (live)" if auto_trading else "notifications-only"
+    await notifier.send_text(
+        f"✅ Scheduler started — strategy={active_strategy}, mode={mode_label}."
+    )
 
     # Sprint 7: orphan / lost-order reconciliation on startup. Idempotent
     # so a crash-restart loop does not amplify side effects.
@@ -150,6 +154,58 @@ async def _amain(settings: ModuleType) -> None:
     # Scheduler
     scheduler = AsyncIOScheduler(timezone=_TZ_PARIS)
 
+    # ------------------------------------------------------------------
+    # Rotation strategy registration (trend_rotation_d1).
+    # Runs ONE job per weekday at the configured Paris-local D1 close.
+    # No killzones, no per-trade lifecycle (rotation has no SL/TP),
+    # no end-of-killzone cleanup. Outcome reconciliation is also
+    # skipped — rotation positions journal themselves on close.
+    # ------------------------------------------------------------------
+    if active_strategy == "trend_rotation_d1":
+        rotation_hour = int(getattr(settings, "ROTATION_CRON_HOUR_PARIS", 23))
+        rotation_minute = int(getattr(settings, "ROTATION_CRON_MINUTE_PARIS", 0))
+
+        def rotation_job():
+            try:
+                run_rotation_cycle(
+                    mt5,
+                    session_factory,
+                    notifier,
+                    settings,
+                    now_utc=datetime.now(UTC),
+                    dry_run=bool(getattr(settings, "AUTO_TRADING_DRY_RUN", False))
+                    or not auto_trading,
+                )
+            except Exception as exc:  # noqa: BLE001 — survive bad cycles
+                logger.exception("rotation_job uncaught error")
+                asyncio.ensure_future(
+                    notifier.send_error(f"⚠️ rotation scheduler error: {exc!r}")
+                )
+
+        scheduler.add_job(
+            rotation_job,
+            CronTrigger(
+                day_of_week="mon-fri",
+                hour=rotation_hour,
+                minute=rotation_minute,
+                timezone=_TZ_PARIS,
+            ),
+            id="rotation_cycle",
+            replace_existing=True,
+        )
+        scheduler.start()
+        logger.info(
+            "scheduler: rotation strategy active, %d job(s) registered, "
+            "trigger=%02d:%02d Paris weekdays",
+            len(scheduler.get_jobs()), rotation_hour, rotation_minute,
+        )
+        # Block on shutdown signal — same pattern as the TJR branch.
+        await _await_shutdown(notifier, scheduler, mt5)
+        return
+
+    # ------------------------------------------------------------------
+    # TJR strategy registration (default — preserved unchanged).
+    # ------------------------------------------------------------------
     # Detection cycle: every N min during each killzone (Paris-local cron).
     interval = int(getattr(settings, "DETECTION_INTERVAL_MINUTES", 5))
     london_kz = settings.KILLZONE_LONDON
@@ -389,7 +445,15 @@ async def _amain(settings: ModuleType) -> None:
         ny_kz,
     )
 
-    # Block on a future that resolves only on shutdown signal.
+    await _await_shutdown(notifier, scheduler, mt5)
+
+
+async def _await_shutdown(notifier, scheduler, mt5_client) -> None:
+    """Block on SIGTERM/SIGINT, then shut down scheduler / notifier / MT5.
+
+    Extracted so the TJR and rotation registration branches share the
+    same shutdown path without duplicating signal-handler boilerplate.
+    """
     stop = asyncio.Event()
 
     def _on_signal():
@@ -409,11 +473,11 @@ async def _amain(settings: ModuleType) -> None:
         logger.info("scheduler: shutting down")
         scheduler.shutdown(wait=False)
         try:
-            await notifier.send_text("⏹️ TJR scheduler stopped.")
+            await notifier.send_text("⏹️ Scheduler stopped.")
         except Exception:  # noqa: BLE001
             pass
         await notifier.stop()
-        mt5.shutdown()
+        mt5_client.shutdown()
         logger.info("scheduler: clean exit")
 
 
