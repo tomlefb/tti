@@ -340,3 +340,225 @@ def test_disable_for_day_flips_flag(engine):
         from src.journal.repository import is_auto_trading_disabled
 
         assert is_auto_trading_disabled(s, day=today) is True
+
+
+# -----------------------------------------------------------------------------
+# adaptive_risk_per_trade_pct (rotation strategy)
+# -----------------------------------------------------------------------------
+
+
+def test_adaptive_risk_returns_full_when_capital_at_or_above_floor():
+    from src.execution.safe_guards import adaptive_risk_per_trade_pct
+
+    # Operator-spec: capital >= $4,950 -> 1 % full rate.
+    assert adaptive_risk_per_trade_pct(
+        current_capital_usd=4950.0,
+        capital_floor_for_full_risk_usd=4950.0,
+        risk_full_pct=0.01,
+        risk_reduced_pct=0.005,
+    ) == 0.01
+
+    assert adaptive_risk_per_trade_pct(
+        current_capital_usd=5500.0,
+        capital_floor_for_full_risk_usd=4950.0,
+        risk_full_pct=0.01,
+        risk_reduced_pct=0.005,
+    ) == 0.01
+
+
+def test_adaptive_risk_returns_reduced_when_capital_below_floor():
+    from src.execution.safe_guards import adaptive_risk_per_trade_pct
+
+    # Operator-spec: capital < $4,950 -> 0.5 % reduced rate.
+    assert adaptive_risk_per_trade_pct(
+        current_capital_usd=4850.0,
+        capital_floor_for_full_risk_usd=4950.0,
+        risk_full_pct=0.01,
+        risk_reduced_pct=0.005,
+    ) == 0.005
+
+
+def test_adaptive_risk_clips_negative_capital_to_reduced():
+    from src.execution.safe_guards import adaptive_risk_per_trade_pct
+
+    # Defensive: a wonky negative capital read should still yield the
+    # safer reduced rate rather than crash.
+    assert adaptive_risk_per_trade_pct(
+        current_capital_usd=-100.0,
+        capital_floor_for_full_risk_usd=4950.0,
+        risk_full_pct=0.01,
+        risk_reduced_pct=0.005,
+    ) == 0.005
+
+
+# -----------------------------------------------------------------------------
+# check_rotation_pre_rebalance
+# -----------------------------------------------------------------------------
+
+
+def _rotation_settings(**overrides):
+    base = dict(
+        KILL_SWITCH_PATH=None,
+        ROTATION_CAPITAL_FLOOR_USD=4500.0,
+        DAILY_LOSS_LIMIT_USD=200.0,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_check_rotation_pre_rebalance_passes_on_clean_state(engine, tmp_path):
+    from src.execution.safe_guards import check_rotation_pre_rebalance
+
+    settings = _rotation_settings(KILL_SWITCH_PATH=tmp_path / "absent")
+    with session_scope(engine) as s:
+        allowed, reason = check_rotation_pre_rebalance(
+            s,
+            settings=settings,
+            now_utc=_now(),
+            current_capital_usd=4850.0,
+            daily_pnl_usd=-50.0,
+        )
+    assert allowed is True
+    assert reason is None
+
+
+def test_check_rotation_pre_rebalance_blocks_on_kill_switch(engine, tmp_path):
+    from src.execution.safe_guards import check_rotation_pre_rebalance
+
+    kill = tmp_path / "KILL_SWITCH"
+    kill.touch()
+    settings = _rotation_settings(KILL_SWITCH_PATH=kill)
+    with session_scope(engine) as s:
+        allowed, reason = check_rotation_pre_rebalance(
+            s, settings=settings, now_utc=_now(),
+            current_capital_usd=4850.0, daily_pnl_usd=0.0,
+        )
+    assert allowed is False
+    assert reason == "kill_switch"
+
+
+def test_check_rotation_pre_rebalance_blocks_on_capital_floor(engine, tmp_path):
+    from src.execution.safe_guards import check_rotation_pre_rebalance
+
+    settings = _rotation_settings(
+        KILL_SWITCH_PATH=tmp_path / "absent",
+        ROTATION_CAPITAL_FLOOR_USD=4500.0,
+    )
+    with session_scope(engine) as s:
+        allowed, reason = check_rotation_pre_rebalance(
+            s, settings=settings, now_utc=_now(),
+            current_capital_usd=4400.0,  # below floor
+            daily_pnl_usd=0.0,
+        )
+    assert allowed is False
+    assert reason == "capital_below_safe_threshold"
+
+
+def test_check_rotation_pre_rebalance_blocks_on_daily_limit(engine, tmp_path):
+    from src.execution.safe_guards import check_rotation_pre_rebalance
+
+    settings = _rotation_settings(
+        KILL_SWITCH_PATH=tmp_path / "absent",
+        DAILY_LOSS_LIMIT_USD=200.0,
+    )
+    with session_scope(engine) as s:
+        allowed, reason = check_rotation_pre_rebalance(
+            s, settings=settings, now_utc=_now(),
+            current_capital_usd=4850.0,
+            daily_pnl_usd=-200.0,  # exactly at limit -> blocked
+        )
+    assert allowed is False
+    assert reason == "daily_loss_limit_reached"
+
+
+def test_check_rotation_pre_rebalance_blocks_on_day_disabled(engine, tmp_path):
+    from src.execution.safe_guards import check_rotation_pre_rebalance
+
+    today = _now().astimezone(_TZ_PARIS).date()
+    with session_scope(engine) as s:
+        from src.journal.repository import disable_auto_trading_for_day
+
+        disable_auto_trading_for_day(s, day=today, reason="prior_circuit_breaker")
+
+    settings = _rotation_settings(KILL_SWITCH_PATH=tmp_path / "absent")
+    with session_scope(engine) as s:
+        allowed, reason = check_rotation_pre_rebalance(
+            s, settings=settings, now_utc=_now(),
+            current_capital_usd=4850.0, daily_pnl_usd=0.0,
+        )
+    assert allowed is False
+    assert reason == "auto_trading_disabled"
+
+
+# -----------------------------------------------------------------------------
+# check_rotation_per_trade
+# -----------------------------------------------------------------------------
+
+
+def _symbol_info(volume_min=0.01, volume_step=0.01, volume_max=100.0):
+    return SimpleNamespace(
+        volume_min=volume_min, volume_step=volume_step, volume_max=volume_max,
+    )
+
+
+def test_check_rotation_per_trade_passes_on_clean_inputs():
+    from src.execution.safe_guards import check_rotation_per_trade
+
+    allowed, reason = check_rotation_per_trade(
+        symbol="XAUUSD", volume=0.05, symbol_info=_symbol_info(),
+        margin_required_usd=100.0, margin_free_usd=500.0,
+        spread=0.5, typical_spread=0.5,
+    )
+    assert allowed is True
+    assert reason is None
+
+
+def test_check_rotation_per_trade_blocks_below_volume_min():
+    from src.execution.safe_guards import check_rotation_per_trade
+
+    allowed, reason = check_rotation_per_trade(
+        symbol="XAUUSD", volume=0.001, symbol_info=_symbol_info(volume_min=0.01),
+        margin_required_usd=None, margin_free_usd=None,
+        spread=0.5, typical_spread=0.5,
+    )
+    assert allowed is False
+    assert reason is not None and "volume_below_minimum" in reason
+
+
+def test_check_rotation_per_trade_blocks_above_volume_max():
+    from src.execution.safe_guards import check_rotation_per_trade
+
+    allowed, reason = check_rotation_per_trade(
+        symbol="BTCUSD", volume=200.0, symbol_info=_symbol_info(volume_max=100.0),
+        margin_required_usd=None, margin_free_usd=None,
+        spread=10.0, typical_spread=5.0,
+    )
+    assert allowed is False
+    assert reason is not None and "volume_above_maximum" in reason
+
+
+def test_check_rotation_per_trade_blocks_on_insufficient_margin():
+    from src.execution.safe_guards import check_rotation_per_trade
+
+    allowed, reason = check_rotation_per_trade(
+        symbol="XAUUSD", volume=0.05, symbol_info=_symbol_info(),
+        margin_required_usd=600.0, margin_free_usd=500.0,
+        spread=0.5, typical_spread=0.5,
+    )
+    assert allowed is False
+    assert reason is not None and "insufficient_margin" in reason
+
+
+def test_check_rotation_per_trade_does_not_block_on_spread_anomaly():
+    """Spread anomaly is journalled but never blocks (operator design)."""
+    from src.execution.safe_guards import check_rotation_per_trade
+
+    allowed, reason = check_rotation_per_trade(
+        symbol="XAUUSD", volume=0.05, symbol_info=_symbol_info(),
+        margin_required_usd=100.0, margin_free_usd=500.0,
+        spread=10.0,            # 20× the typical
+        typical_spread=0.5,
+        spread_anomaly_multiplier=3.0,
+    )
+    assert allowed is True
+    assert reason is None

@@ -197,3 +197,126 @@ def disable_for_day(
 
     disable_auto_trading_for_day(journal_session, day=day, reason=reason)
     logger.critical("auto-trading disabled for %s — reason=%s", day, reason)
+
+
+# ---------------------------------------------------------------------------
+# Rotation strategy — adaptive risk + per-rebalance pre-checks
+# ---------------------------------------------------------------------------
+
+
+def adaptive_risk_per_trade_pct(
+    *,
+    current_capital_usd: float,
+    capital_floor_for_full_risk_usd: float,
+    risk_full_pct: float,
+    risk_reduced_pct: float,
+) -> float:
+    """Pick the per-trade risk fraction based on the live capital level.
+
+    Implements the operator's $4,950 / 1.0 % vs <$4,950 / 0.5 % rule
+    parametrically — the breakpoint and both rates come from settings so
+    tests and config changes don't need to touch this code.
+
+    Returns a fraction (e.g. ``0.005`` = 0.5 %) suitable for ``risk_usd =
+    capital × fraction`` calls downstream. Both inputs are clipped to
+    >= 0; a zero or negative capital returns the reduced rate.
+    """
+    capital = max(0.0, float(current_capital_usd))
+    floor = float(capital_floor_for_full_risk_usd)
+    full = float(risk_full_pct)
+    reduced = float(risk_reduced_pct)
+    return full if capital >= floor else reduced
+
+
+def check_rotation_pre_rebalance(
+    journal_session: Session,
+    *,
+    settings: Any,
+    now_utc: datetime,
+    current_capital_usd: float,
+    daily_pnl_usd: float,
+) -> tuple[bool, str | None]:
+    """Pre-flight gate run once at the START of a rotation rebalance cycle.
+
+    Runs the rotation-specific safety checks in order:
+
+    1. Kill switch file present → block.
+    2. Day-disabled flag (set by hard-stops on a critical fault) → block.
+    3. Live capital below safe floor (``settings.ROTATION_CAPITAL_FLOOR_USD``)
+       → block. Existing positions are left alone; only *new* opens are
+       blocked.
+    4. Daily P&L breached the hard daily-loss limit
+       (``settings.DAILY_LOSS_LIMIT_USD``) → block. The 75 % soft warning
+       is fired separately by the cycle, not here.
+
+    Returns ``(allowed, reason_if_blocked)``. The first failing gate
+    wins. Compatible with :func:`check_pre_trade` patterns — same
+    return shape, distinct reason codes for cleaner Telegram routing.
+    """
+    kill_path = getattr(settings, "KILL_SWITCH_PATH", None)
+    if kill_switch_active(kill_path):
+        return False, "kill_switch"
+
+    today_paris = now_utc.astimezone(_TZ_PARIS).date()
+    if is_auto_trading_disabled(journal_session, day=today_paris):
+        return False, "auto_trading_disabled"
+
+    floor = float(getattr(settings, "ROTATION_CAPITAL_FLOOR_USD", 0.0))
+    if floor > 0 and float(current_capital_usd) < floor:
+        return False, "capital_below_safe_threshold"
+
+    hard_limit = float(getattr(settings, "DAILY_LOSS_LIMIT_USD", 0.0))
+    if hard_limit > 0 and float(daily_pnl_usd) <= -hard_limit:
+        return False, "daily_loss_limit_reached"
+
+    return True, None
+
+
+def check_rotation_per_trade(
+    *,
+    symbol: str,
+    volume: float,
+    symbol_info: Any,
+    margin_required_usd: float | None,
+    margin_free_usd: float | None,
+    spread: float,
+    typical_spread: float | None,
+    spread_anomaly_multiplier: float = 3.0,
+) -> tuple[bool, str | None]:
+    """Per-trade pre-flight for a single rotation order.
+
+    Distinct from :func:`check_pre_trade` because rotation entries have
+    no ``Setup`` (no SL/TP/RR) — the only inputs are the symbol, the
+    computed volume, and the live broker info. Checks:
+
+    1. Volume is between the broker's volume_min and volume_max.
+    2. If margin info is supplied, ``margin_required_usd <= margin_free_usd``.
+    3. Spread anomaly is logged BUT does not block (matches the TJR
+       convention; the boolean returned reflects whether the anomaly
+       fired so the caller can journal it).
+
+    Returns ``(allowed, reason_if_blocked)``. ``allowed=True`` always
+    when only spread is anomalous.
+    """
+    vmin = float(getattr(symbol_info, "volume_min", 0.0))
+    vmax = float(getattr(symbol_info, "volume_max", 0.0))
+    v = float(volume)
+    if v < vmin:
+        return False, f"volume_below_minimum:{symbol}:{v}<{vmin}"
+    if vmax > 0 and v > vmax:
+        return False, f"volume_above_maximum:{symbol}:{v}>{vmax}"
+
+    if margin_required_usd is not None and margin_free_usd is not None:
+        if float(margin_required_usd) > float(margin_free_usd):
+            return False, (
+                f"insufficient_margin:{symbol}:"
+                f"req={margin_required_usd:.2f}>free={margin_free_usd:.2f}"
+            )
+
+    # Spread anomaly is logged-only (caller decides whether to journal);
+    # this function does not block on it. Return value documents whether
+    # it fired so the caller can act.
+    _ = should_log_spread_anomaly(
+        current=spread, typical=typical_spread, multiplier=spread_anomaly_multiplier
+    )
+    return True, None
