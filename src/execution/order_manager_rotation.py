@@ -234,12 +234,17 @@ def open_rotation_position(
 
     magic = int(getattr(settings, "ROTATION_MAGIC_NUMBER", 7799))
     try:
+        # Comment shape "r{magic}_{symbol}" stays under the broker's 20-char
+        # cap (``MT5Client._sanitize_order_comment``) for every universe
+        # symbol. The longest live symbol is "USDJPY" (6 chars) → total 12.
+        # Original "rotation:trend_rotation_d1:open" was 31 chars and got
+        # rejected by FundedNext-Server with "Invalid comment argument".
         send_result = mt5_client.place_market_order(
             symbol=symbol,
             direction=direction,
             volume=float(volume),
             magic=magic,
-            comment=f"rotation:{strategy}:open",
+            comment=f"r{magic}_{symbol}",
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("place_market_order raised for %s", symbol)

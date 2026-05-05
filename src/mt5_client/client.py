@@ -22,11 +22,37 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import re
 from typing import Any
 
 import pandas as pd
 
 from src.journal.outcome_tracker import Mt5Trade
+
+# FundedNext-Server (and probably most MT5 broker servers) reject any
+# order_send request whose ``comment`` field is "too long" or contains
+# unexpected characters. Empirically (commit fea788f, scripts/probe_
+# order_check_comment.py), comments ≥ 31 chars all fail with
+# 'Invalid "comment" argument'; ≤ 19 chars all succeed regardless of
+# punctuation. Cap at 20 with a small safety margin and replace anything
+# that isn't ASCII alphanumeric / underscore / dash with an underscore.
+_COMMENT_MAX_LEN = 20
+_COMMENT_SAFE_RE = re.compile(r"[^A-Za-z0-9_\-]")
+
+
+def _sanitize_order_comment(comment: str | None) -> str:
+    """Make ``comment`` safe to pass to MT5 ``order_send``.
+
+    - ``None`` becomes empty string (the broker accepts an empty comment).
+    - Non-ASCII / punctuation chars are replaced by ``_`` (FundedNext
+      rejects ``:`` and probably others).
+    - Truncated to ``_COMMENT_MAX_LEN`` chars to stay under the broker's
+      length cap.
+    """
+    if not comment:
+        return ""
+    cleaned = _COMMENT_SAFE_RE.sub("_", str(comment))
+    return cleaned[:_COMMENT_MAX_LEN]
 from src.mt5_client.exceptions import (
     MT5AccountError,
     MT5ConnectionError,
@@ -428,7 +454,7 @@ class MT5Client:
             "sl": float(sl),
             "tp": float(tp),
             "magic": int(magic),
-            "comment": str(comment),
+            "comment": _sanitize_order_comment(comment),
             "type_time": self._mt5.ORDER_TIME_GTC,
             "type_filling": self._mt5.ORDER_FILLING_IOC,
         }
@@ -499,7 +525,7 @@ class MT5Client:
             "sl": float(sl),
             "tp": float(tp),
             "magic": int(magic),
-            "comment": str(comment),
+            "comment": _sanitize_order_comment(comment),
             "type_time": self._mt5.ORDER_TIME_GTC,
             "type_filling": self._mt5.ORDER_FILLING_IOC,
         }
