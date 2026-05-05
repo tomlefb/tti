@@ -36,6 +36,9 @@ def _connected_client(mt5: MagicMock) -> MT5Client:
     mt5.TRADE_ACTION_PENDING = 5
     mt5.TRADE_ACTION_REMOVE = 8
     mt5.TRADE_ACTION_SLTP = 7
+    mt5.TRADE_ACTION_DEAL = 1
+    mt5.ORDER_TYPE_BUY = 0
+    mt5.ORDER_TYPE_SELL = 1
     mt5.ORDER_TYPE_BUY_LIMIT = 2
     mt5.ORDER_TYPE_SELL_LIMIT = 3
     mt5.ORDER_TIME_GTC = 0
@@ -173,6 +176,97 @@ def test_place_limit_order_propagates_mt5_none_as_error():
             sl=4375.0,
             tp=4080.5,
             magic=7766,
+        )
+
+
+# -----------------------------------------------------------------------------
+# place_market_order — rotation strategy primitive
+# -----------------------------------------------------------------------------
+
+
+def _market_tick(*, ask: float, bid: float):
+    """Override the connect-time symbol_info_tick stub for the per-call read."""
+    return SimpleNamespace(ask=ask, bid=bid, time=datetime.now(tz=UTC).timestamp())
+
+
+def test_place_market_order_long_uses_ask_and_emits_buy_deal():
+    mt5 = MagicMock()
+    mt5.order_send.return_value = SimpleNamespace(
+        retcode=10009, order=0, deal=12345, comment="Done", request_id=1
+    )
+    client = _connected_client(mt5)
+    # Override the cached connect-time tick so the per-call read returns
+    # an ask/bid pair (the connect-time stub only sets ``time``).
+    mt5.symbol_info_tick.return_value = _market_tick(ask=4360.5, bid=4360.0)
+
+    result = client.place_market_order(
+        symbol="XAUUSD",
+        direction="long",
+        volume=0.05,
+        magic=7799,
+        comment="rotation:trend_rotation_d1:open",
+    )
+
+    assert result.retcode == 10009
+    assert result.deal == 12345
+    args, _ = mt5.order_send.call_args
+    req = args[0]
+    assert req["action"] == mt5.TRADE_ACTION_DEAL
+    assert req["type"] == mt5.ORDER_TYPE_BUY
+    assert req["price"] == 4360.5  # long uses ask
+    assert req["sl"] == 0.0
+    assert req["tp"] == 0.0
+    assert req["magic"] == 7799
+
+
+def test_place_market_order_short_uses_bid_and_emits_sell_deal():
+    mt5 = MagicMock()
+    mt5.order_send.return_value = SimpleNamespace(
+        retcode=10009, order=0, deal=12346, comment="Done", request_id=1
+    )
+    client = _connected_client(mt5)
+    mt5.symbol_info_tick.return_value = _market_tick(ask=4360.5, bid=4360.0)
+
+    client.place_market_order(
+        symbol="XAUUSD",
+        direction="short",
+        volume=0.05,
+        magic=7799,
+    )
+    args, _ = mt5.order_send.call_args
+    req = args[0]
+    assert req["type"] == mt5.ORDER_TYPE_SELL
+    assert req["price"] == 4360.0  # short uses bid
+
+
+def test_place_market_order_unknown_direction_raises():
+    mt5 = MagicMock()
+    client = _connected_client(mt5)
+    with pytest.raises(ValueError, match="direction"):
+        client.place_market_order(
+            symbol="XAUUSD", direction="flat", volume=0.05, magic=7799
+        )
+
+
+def test_place_market_order_no_tick_raises_mt5_error():
+    mt5 = MagicMock()
+    client = _connected_client(mt5)
+    # After connect, force the next per-call tick to None.
+    mt5.symbol_info_tick.return_value = None
+    with pytest.raises(MT5Error, match="symbol_info_tick"):
+        client.place_market_order(
+            symbol="XAUUSD", direction="long", volume=0.05, magic=7799
+        )
+
+
+def test_place_market_order_propagates_mt5_none_as_error():
+    mt5 = MagicMock()
+    mt5.order_send.return_value = None
+    client = _connected_client(mt5)
+    mt5.symbol_info_tick.return_value = _market_tick(ask=4360.5, bid=4360.0)
+    with pytest.raises(MT5Error, match="order_send"):
+        client.place_market_order(
+            symbol="XAUUSD", direction="long", volume=0.05, magic=7799
         )
 
 

@@ -444,6 +444,77 @@ class MT5Client:
             request_id=int(getattr(result, "request_id", 0)),
         )
 
+    def place_market_order(
+        self,
+        *,
+        symbol: str,
+        direction: str,
+        volume: float,
+        magic: int,
+        sl: float = 0.0,
+        tp: float = 0.0,
+        comment: str = "",
+    ) -> OrderSendResult:
+        """Submit a market BUY (long) or SELL (short) order.
+
+        Used by the rotation strategy where entries fire at the D1 close
+        of the rebalance day (no limit price). The market price is read
+        from ``symbol_info_tick`` immediately before sending — ask for
+        long entries, bid for short — so the deal hits the live spread.
+
+        ``sl`` and ``tp`` default to ``0.0`` (broker's "no SL/TP" sentinel)
+        — rotation has no hard SL/TP, exits happen at the next rebalance.
+
+        Raises:
+            ValueError: ``direction`` is not ``"long"`` or ``"short"``.
+            MT5Error: ``mt5.symbol_info_tick`` returned ``None`` (no live
+                price) or ``mt5.order_send`` returned ``None``.
+            MT5ConnectionError: client not connected.
+        """
+        self._require_connected()
+        if direction == "long":
+            order_type = self._mt5.ORDER_TYPE_BUY
+        elif direction == "short":
+            order_type = self._mt5.ORDER_TYPE_SELL
+        else:
+            raise ValueError(
+                f"direction must be 'long' or 'short', got {direction!r}"
+            )
+
+        tick = self._mt5.symbol_info_tick(symbol)
+        if tick is None:
+            err = self._safe_last_error()
+            raise MT5Error(
+                f"symbol_info_tick({symbol!r}) returned None. "
+                f"last_error={err!r}"
+            )
+        price = float(getattr(tick, "ask" if direction == "long" else "bid", 0.0))
+
+        request = {
+            "action": self._mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": float(volume),
+            "type": order_type,
+            "price": price,
+            "sl": float(sl),
+            "tp": float(tp),
+            "magic": int(magic),
+            "comment": str(comment),
+            "type_time": self._mt5.ORDER_TIME_GTC,
+            "type_filling": self._mt5.ORDER_FILLING_IOC,
+        }
+        result = self._mt5.order_send(request)
+        if result is None:
+            err = self._safe_last_error()
+            raise MT5Error(f"order_send returned None. last_error={err!r}")
+        return OrderSendResult(
+            retcode=int(getattr(result, "retcode", 0)),
+            order=int(getattr(result, "order", 0)),
+            deal=int(getattr(result, "deal", 0)),
+            comment=str(getattr(result, "comment", "")),
+            request_id=int(getattr(result, "request_id", 0)),
+        )
+
     def cancel_pending_order(self, ticket: int) -> bool:
         """Remove a pending limit order by ticket.
 
