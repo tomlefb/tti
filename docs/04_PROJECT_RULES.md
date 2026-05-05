@@ -80,6 +80,57 @@ here, then to the strategy doc, then to the detection philosophy doc.
 
 ---
 
+## Schema migration policy
+
+**Any change to an existing journal table requires an explicit
+migration entry in `scripts/migrate_journal_schema.py`** before the
+code change ships. SQLAlchemy's `Base.metadata.create_all` (called by
+`init_db`) only creates **missing tables** — it does NOT add columns
+to tables that already exist. Without an explicit migration, journals
+that started life on an older sprint accumulate schema drift versus
+the model definitions, and any query that touches the new columns
+raises `OperationalError: no such column: …` at runtime.
+
+This rule was added 2026-05-05 after a Sprint 5 → Sprint 7 schema
+drift surfaced during the trend_rotation_d1 v1.1 stage-3 smoke test
+(legacy `daily_state` table missing `bias_ethusd_*`,
+`auto_trading_disabled`, `disabled_reason`). The rotation cycle
+defensively blocks with reason `"journal_schema_mismatch"` when the
+query raises, so the scheduler refuses to fire trades against an
+unknown safety state — but the right fix is a forward-compatible
+migration, not a defensive guard.
+
+What "an existing table" means:
+
+- **New table**: ship as a fresh model in `src/journal/models.py`.
+  `init_db` creates it on next start. **No migration needed.**
+- **New column on an existing table**: ship the model change AND
+  append `(table, column, sql_type, default_clause)` to
+  `_MIGRATIONS` in `scripts/migrate_journal_schema.py`. The script is
+  idempotent — re-running on an already-migrated DB is a no-op.
+- **Column type change / column drop**: avoid. SQLite does not support
+  these in-place. If unavoidable, write a one-shot migration that
+  reads the table into a fresh shape and swaps it atomically (out of
+  scope of the lightweight `migrate_journal_schema.py` framework —
+  treat each as a custom script).
+
+Operator workflow on schema-drift detection:
+
+1. The runtime surfaces an `OperationalError: no such column: …` or
+   the rotation cycle reports `journal_schema_mismatch`.
+2. Run `python -m scripts.migrate_journal_schema --dry-run` against
+   the offending DB to see what columns are missing.
+3. Back up the DB (`cp data/journal.db data/journal.db.bak_<TS>`)
+   then re-run without `--dry-run` to apply.
+4. Confirm green by re-running whatever surfaced the error.
+
+The migration script's manifest is the canonical history of every
+column that's been added to an existing table. Never reorder or
+delete entries — they describe the migration history, not just the
+desired end state.
+
+---
+
 ## Logging
 
 - Use stdlib `logging`, configured once at startup in `src/scheduler/runner.py`.
