@@ -264,3 +264,72 @@ async def test_send_error_uses_send_message_and_swallows_failures(fake_applicati
     fake_application.bot.send_message = AsyncMock(side_effect=RuntimeError("nope"))
     ok = await notifier.send_error("again")
     assert ok is False
+
+
+# -----------------------------------------------------------------------------
+# Bug 2 + 3: HTML parse_mode + thread-safe scheduling
+# -----------------------------------------------------------------------------
+
+
+async def test_send_html_threadsafe_passes_html_parse_mode(fake_application) -> None:
+    """``send_html_threadsafe`` forces parse_mode='HTML' on the underlying
+    send_text call so message_formatter HTML templates render correctly
+    in Telegram (Bug 2 — was rendering literal ``<b>...</b>`` text)."""
+    import asyncio
+    fake_application.bot.send_message = AsyncMock(return_value=None)
+    notifier = tg_module.TelegramNotifier(bot_token="t", chat_id=42)
+    # Capture a real loop reference so the threadsafe path engages.
+    notifier._main_loop = asyncio.get_running_loop()
+    notifier.send_html_threadsafe("<b>Rebalance executed</b>")
+    # Let the scheduled coroutine drain.
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    fake_application.bot.send_message.assert_awaited()
+    kwargs = fake_application.bot.send_message.await_args.kwargs
+    assert kwargs["parse_mode"] == "HTML"
+    assert kwargs["text"] == "<b>Rebalance executed</b>"
+
+
+async def test_send_html_threadsafe_uses_main_loop_when_set(
+    fake_application,
+) -> None:
+    """When ``_main_loop`` is set (production path: captured by
+    start_polling), the call routes through run_coroutine_threadsafe so
+    a worker thread can safely schedule onto the polling loop. Bug 3 —
+    a fresh ``asyncio.run`` per call invalidated the bot's HTTP client
+    on the second call."""
+    import asyncio
+    notifier = tg_module.TelegramNotifier(bot_token="t", chat_id=42)
+    notifier._main_loop = asyncio.get_running_loop()
+    fake_application.bot.send_message = AsyncMock(return_value=None)
+    # Two consecutive sends in the same "cycle" — both must succeed.
+    notifier.send_html_threadsafe("<b>scheduled</b>")
+    notifier.send_html_threadsafe("<b>executed</b>")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert fake_application.bot.send_message.await_count == 2
+
+
+async def test_send_html_threadsafe_falls_back_when_no_loop(
+    fake_application, monkeypatch
+) -> None:
+    """When ``_main_loop`` is unset (tests / dry-run pre-start_polling),
+    the helper falls back to running-loop ``ensure_future`` so the test
+    flow doesn't blow up."""
+    import asyncio
+    notifier = tg_module.TelegramNotifier(bot_token="t", chat_id=42)
+    notifier._main_loop = None  # explicit
+    fake_application.bot.send_message = AsyncMock(return_value=None)
+    notifier.send_html_threadsafe("<b>fallback</b>")
+    await asyncio.sleep(0)
+    fake_application.bot.send_message.assert_awaited_once()
+
+
+async def test_start_polling_captures_main_loop(fake_application) -> None:
+    """``start_polling`` must store the running loop reference so the
+    threadsafe helper has a target."""
+    import asyncio
+    notifier = tg_module.TelegramNotifier(bot_token="t", chat_id=42)
+    assert notifier._main_loop is None
+    await notifier.start_polling()
+    assert notifier._main_loop is asyncio.get_running_loop()

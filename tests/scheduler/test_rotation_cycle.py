@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import numpy as np
 import pandas as pd
@@ -74,6 +74,10 @@ def notifier():
     n.send_text = AsyncMock(return_value=None)
     n.send_error = AsyncMock(return_value=None)
     n.send_setup = AsyncMock(return_value=None)
+    # Sync helper added in the Bug 2/3 fix bundle — combines parse_mode=HTML
+    # + thread-safe scheduling. The rotation cycle uses this instead of
+    # _run_async(notifier.send_text(...)) for HTML payloads.
+    n.send_html_threadsafe = MagicMock(return_value=None)
     return n
 
 
@@ -231,7 +235,7 @@ def test_rotation_cycle_blocks_on_kill_switch(
     assert report.fired is False
     assert report.skipped_reason == "kill_switch"
     # Kill switch fired — Telegram alert sent.
-    assert notifier.send_error.await_count == 1
+    assert notifier.send_html_threadsafe.call_count == 1
     # No MT5 calls beyond the account info read.
     methods = [c[0] for c in mt5.calls]
     assert "fetch_ohlc" not in methods
@@ -252,7 +256,7 @@ def test_rotation_cycle_blocks_on_capital_below_floor(
         now_utc=datetime(2026, 5, 5, 21, 0, tzinfo=UTC),
     )
     assert report.skipped_reason == "capital_below_safe_threshold"
-    assert notifier.send_error.await_count == 1
+    assert notifier.send_html_threadsafe.call_count == 1
     methods = [c[0] for c in mt5.calls]
     assert "fetch_ohlc" not in methods
 

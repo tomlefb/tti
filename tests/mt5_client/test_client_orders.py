@@ -271,6 +271,83 @@ def test_place_market_order_propagates_mt5_none_as_error():
 
 
 # -----------------------------------------------------------------------------
+# Comment sanitization (Bug 1 fix — FundedNext-Server "Invalid comment" 31+ chars)
+# -----------------------------------------------------------------------------
+
+
+def test_place_market_order_truncates_long_comment():
+    mt5 = MagicMock()
+    mt5.order_send.return_value = SimpleNamespace(
+        retcode=10009, order=0, deal=999, comment="Done", request_id=1
+    )
+    client = _connected_client(mt5)
+    mt5.symbol_info_tick.return_value = _market_tick(ask=4360.5, bid=4360.0)
+
+    long_comment = "rotation:trend_rotation_d1:open_with_extra_padding"  # 50 chars
+    client.place_market_order(
+        symbol="XAUUSD", direction="long", volume=0.05, magic=7799,
+        comment=long_comment,
+    )
+    args, _ = mt5.order_send.call_args
+    sanitized = args[0]["comment"]
+    assert len(sanitized) <= 20
+    # Special chars (':') replaced with '_'.
+    assert ":" not in sanitized
+
+
+def test_place_market_order_replaces_special_chars_in_comment():
+    mt5 = MagicMock()
+    mt5.order_send.return_value = SimpleNamespace(
+        retcode=10009, order=0, deal=999, comment="Done", request_id=1
+    )
+    client = _connected_client(mt5)
+    mt5.symbol_info_tick.return_value = _market_tick(ask=4360.5, bid=4360.0)
+    client.place_market_order(
+        symbol="XAUUSD", direction="long", volume=0.05, magic=7799,
+        comment="r:s/v.7",
+    )
+    args, _ = mt5.order_send.call_args
+    sanitized = args[0]["comment"]
+    # ASCII alphanumeric / underscore / dash only.
+    assert all(c.isalnum() or c in "_-" for c in sanitized)
+
+
+def test_place_market_order_handles_none_comment():
+    """``comment=None`` must not crash; the broker accepts an empty string."""
+    mt5 = MagicMock()
+    mt5.order_send.return_value = SimpleNamespace(
+        retcode=10009, order=0, deal=999, comment="Done", request_id=1
+    )
+    client = _connected_client(mt5)
+    mt5.symbol_info_tick.return_value = _market_tick(ask=4360.5, bid=4360.0)
+    # The signature defaults comment="", but explicit None should also work.
+    client.place_market_order(
+        symbol="XAUUSD", direction="long", volume=0.05, magic=7799,
+        comment=None,  # type: ignore[arg-type]
+    )
+    args, _ = mt5.order_send.call_args
+    assert args[0]["comment"] == ""
+
+
+def test_place_limit_order_also_sanitizes_comment():
+    """Sanitization is applied uniformly across order types."""
+    mt5 = MagicMock()
+    mt5.order_send.return_value = SimpleNamespace(
+        retcode=10009, order=0, deal=999, comment="Done", request_id=1
+    )
+    client = _connected_client(mt5)
+    client.place_limit_order(
+        symbol="XAUUSD", direction="short", volume=0.05,
+        price=4360.0, sl=4375.0, tp=4080.0, magic=7766,
+        comment="sprint7:A+_setup_with_long_suffix",  # 32 chars
+    )
+    args, _ = mt5.order_send.call_args
+    sanitized = args[0]["comment"]
+    assert len(sanitized) <= 20
+    assert ":" not in sanitized
+
+
+# -----------------------------------------------------------------------------
 # cancel_pending_order
 # -----------------------------------------------------------------------------
 
