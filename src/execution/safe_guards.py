@@ -258,8 +258,19 @@ def check_rotation_pre_rebalance(
         return False, "kill_switch"
 
     today_paris = now_utc.astimezone(_TZ_PARIS).date()
-    if is_auto_trading_disabled(journal_session, day=today_paris):
-        return False, "auto_trading_disabled"
+    # The day-disabled flag lives on the legacy ``daily_state`` table.
+    # On hosts whose journal DB pre-dates Sprint-7 columns the query
+    # raises a SQLAlchemy OperationalError; treat that as a hard block
+    # rather than silently proceeding past an unknown safety state.
+    try:
+        if is_auto_trading_disabled(journal_session, day=today_paris):
+            return False, "auto_trading_disabled"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "check_rotation_pre_rebalance: is_auto_trading_disabled raised "
+            "(%s) — blocking cycle until schema is reconciled", repr(exc)
+        )
+        return False, "journal_schema_mismatch"
 
     floor = float(getattr(settings, "ROTATION_CAPITAL_FLOOR_USD", 0.0))
     if floor > 0 and float(current_capital_usd) < floor:
