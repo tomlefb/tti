@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -605,3 +605,402 @@ def _pair_short(pair: str) -> str:
         "ETHUSD": "ETH",
     }
     return aliases.get(pair, pair[:3])
+
+
+# ---------------------------------------------------------------------------
+# Rotation strategy (trend_rotation_d1 v1.1) — D1 cycle
+# ---------------------------------------------------------------------------
+#
+# Distinct from ``run_detection_cycle`` (TJR-shaped, killzone-driven, M5):
+# rotation fires once per D1 close, scores the universe over a momentum
+# lookback, and rotates the top-K basket. No setups, no SL/TP — the basket
+# is the unit of decision.
+#
+# State persistence: the journal owns the source of truth. The cycle reads
+# open rotation positions from `rotation_positions` (status='open') to
+# reconstruct the current basket; it writes a new `rebalance_transitions`
+# row + per-asset `rotation_positions` rows on each rebalance.
+
+
+@dataclass
+class RotationCycleReport:
+    """Aggregate of one rotation rebalance for the operator's logs."""
+
+    fired: bool = False
+    skipped_reason: str | None = None  # 'not_due', 'pre_check_blocked', etc.
+    basket_before: list[str] = field(default_factory=list)
+    basket_after: list[str] = field(default_factory=list)
+    closed_assets: list[str] = field(default_factory=list)
+    opened_assets: list[str] = field(default_factory=list)
+    closes_succeeded: int = 0
+    closes_failed: int = 0
+    opens_succeeded: int = 0
+    opens_failed: int = 0
+    capital_usd: float = 0.0
+    risk_pct: float = 0.0
+
+
+def run_rotation_cycle(
+    mt5_client: MT5Client,
+    journal_session_factory: Callable[[], Session],
+    notifier: TelegramNotifier,
+    settings: SchedulerSettings,
+    *,
+    now_utc: datetime,
+    dry_run: bool = False,
+) -> RotationCycleReport:
+    """Run one rebalance cycle for the trend_rotation_d1 strategy.
+
+    Triggered by APScheduler at the configured Paris-local time on
+    weekdays (D1 close convention — the default is 23:00 Paris which
+    sits comfortably after every covered market closes for the day).
+
+    Steps:
+
+    1. Read live account snapshot. Compute live capital + daily P&L
+       and refresh the ``rotation_daily_pnl`` row.
+    2. Pre-flight: :func:`safe_guards.check_rotation_pre_rebalance`
+       (kill switch, day-disabled, capital floor, daily limit).
+    3. Read persisted state from the journal: open rotation positions
+       form the ``current_basket``; the most recent
+       ``entry_timestamp_utc`` defines ``last_rebalance_date``.
+    4. Cadence gate: skip if (now - last_rebalance) <
+       ``ROTATION_REBALANCE_DAYS``.
+    5. Build the per-asset panel from MT5 D1 OHLC.
+    6. Score every asset in the universe (momentum + ATR(20) +
+       volatility regime filter), pick top-K via the rotation
+       pipeline's ranking helper.
+    7. Compute transitions: ``closed = current - new``,
+       ``opened = new - current``. If both are empty, journal the
+       no-op rebalance (idempotency anchor) and return without
+       touching MT5.
+    8. Compute risk-per-trade via the adaptive schedule and size
+       every new entry via :func:`compute_rotation_volume`.
+    9. Insert the ``rebalance_transitions`` row to anchor every
+       per-position FK.
+    10. Execute transitions (closes-then-opens) via
+        :func:`execute_rebalance_transitions`.
+    11. Send a Telegram summary (one message for "scheduled", one
+        for "executed" so the operator sees both phases).
+
+    The TJR cycle (``run_detection_cycle``) is unchanged; the runner
+    decides which one fires based on ``ACTIVE_STRATEGY``.
+
+    Pure data path: every dependency is injected (``mt5_client``,
+    ``journal_session_factory``, ``notifier``, ``settings``). Tests
+    drive the function with a fake MT5 + in-memory SQLite.
+    """
+    # Late imports keep the top-of-module import graph small for the
+    # legacy TJR-only entry points; rotation pulls a deeper subgraph
+    # (pipeline helpers + execution primitives + new repository CRUD).
+    from src.execution.order_manager_rotation import (
+        RebalanceClose,
+        RebalanceOpen,
+        compute_rotation_volume,
+        execute_rebalance_transitions,
+    )
+    from src.execution.safe_guards import (
+        adaptive_risk_per_trade_pct,
+        check_rotation_pre_rebalance,
+    )
+    from src.journal.repository import (
+        get_open_rotation_positions,
+        insert_rebalance_transition,
+        upsert_rotation_daily_pnl,
+    )
+    from src.notification.message_formatter import (
+        format_capital_below_threshold_message,
+        format_killswitch_triggered_message,
+        format_rebalance_error_message,
+        format_rebalance_executed_message,
+        format_rebalance_scheduled_message,
+    )
+    from src.strategies.trend_rotation_d1 import StrategyParams
+    from src.strategies.trend_rotation_d1.pipeline import _score_one_asset
+    from src.strategies.trend_rotation_d1.ranking import select_top_k
+
+    strategy = str(getattr(settings, "ACTIVE_STRATEGY", "trend_rotation_d1"))
+    universe = tuple(getattr(settings, "ROTATION_UNIVERSE", ()))
+    K = int(getattr(settings, "ROTATION_K", 5))
+    momentum_lookback = int(getattr(settings, "ROTATION_MOMENTUM_LOOKBACK_DAYS", 126))
+    rebalance_freq_days = int(getattr(settings, "ROTATION_REBALANCE_DAYS", 5))
+    atr_period = int(getattr(settings, "ROTATION_ATR_PERIOD", 20))
+    today_paris = now_utc.astimezone(_TZ_PARIS).date()
+
+    report = RotationCycleReport()
+
+    # ---- 1. Account snapshot + daily P&L refresh ----
+    try:
+        account = mt5_client.get_account_info()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("rotation cycle: get_account_info failed")
+        report.skipped_reason = "account_info_unavailable"
+        _run_async(notifier.send_error(
+            format_rebalance_error_message(strategy=strategy, error=repr(exc))
+        ))
+        return report
+
+    capital = float(account.balance)
+    report.capital_usd = capital
+    daily_limit = float(getattr(settings, "DAILY_LOSS_LIMIT_USD", 0.0))
+
+    # Two-pass to avoid the chicken-and-egg: read the prior day's row to
+    # know opening_balance, compute the new daily P&L, then upsert. On
+    # the first call of the day the prior row is absent and the upsert
+    # itself captures opening_balance == current_balance (P&L starts at
+    # 0 and grows / drains from there).
+    from src.journal.repository import get_rotation_daily_pnl as _get_dp
+    with journal_session_factory() as s:
+        prior_row = _get_dp(s, day=today_paris)
+    prior_opening = (
+        float(prior_row.opening_balance_usd) if prior_row is not None else capital
+    )
+    daily_pnl_usd = capital - prior_opening
+    limit_remaining = (
+        max(0.0, daily_limit + min(0.0, daily_pnl_usd)) if daily_limit > 0 else 0.0
+    )
+    with journal_session_factory() as s:
+        upsert_rotation_daily_pnl(
+            s, day=today_paris,
+            current_balance_usd=capital,
+            daily_loss_limit_remaining_usd=limit_remaining,
+        )
+
+    # ---- 2. Pre-flight ----
+    with journal_session_factory() as s:
+        allowed, reason = check_rotation_pre_rebalance(
+            s, settings=settings, now_utc=now_utc,
+            current_capital_usd=capital, daily_pnl_usd=daily_pnl_usd,
+        )
+    if not allowed:
+        logger.warning("rotation cycle blocked: %s", reason)
+        report.skipped_reason = reason
+        if reason == "kill_switch":
+            text = format_killswitch_triggered_message(reason=reason, capital_usd=capital)
+        elif reason == "capital_below_safe_threshold":
+            text = format_capital_below_threshold_message(
+                capital_usd=capital,
+                threshold_usd=float(getattr(settings, "ROTATION_CAPITAL_FLOOR_USD", 0.0)),
+            )
+        else:
+            text = format_killswitch_triggered_message(reason=reason, capital_usd=capital)
+        _run_async(notifier.send_error(text))
+        return report
+
+    # ---- 3. Read persisted state ----
+    with journal_session_factory() as s:
+        open_rows = get_open_rotation_positions(s, strategy=strategy)
+    current_basket = {row.symbol for row in open_rows}
+    last_rebalance: datetime | None = None
+    if open_rows:
+        last_rebalance = max(row.entry_timestamp_utc for row in open_rows)
+        if last_rebalance.tzinfo is None:
+            last_rebalance = last_rebalance.replace(tzinfo=UTC)
+
+    # ---- 4. Cadence gate ----
+    if last_rebalance is not None:
+        age_days = (now_utc - last_rebalance).total_seconds() / 86400.0
+        if age_days < rebalance_freq_days:
+            logger.info(
+                "rotation cycle: not due (last=%s, age=%.2f d < freq=%d d)",
+                last_rebalance.isoformat(), age_days, rebalance_freq_days,
+            )
+            report.skipped_reason = "not_due"
+            return report
+
+    # ---- 5. Build panel ----
+    panel: dict[str, "pd.DataFrame"] = {}
+    n_bars_needed = momentum_lookback + atr_period + 30  # warmup buffer
+    for asset in universe:
+        try:
+            df = mt5_client.fetch_ohlc(asset, "D1", n_bars_needed)
+        except Exception as exc:  # noqa: BLE001 — surface but keep going
+            logger.error("rotation cycle: fetch_ohlc(%s, D1) failed: %r", asset, exc)
+            continue
+        # The pipeline expects a time-indexed frame.
+        df_indexed = df.set_index("time").sort_index()
+        panel[asset] = df_indexed
+
+    # ---- 6. Score + select top-K ----
+    params = StrategyParams(
+        universe=universe,
+        momentum_lookback_days=momentum_lookback,
+        K=K,
+        rebalance_frequency_days=rebalance_freq_days,
+        atr_period=atr_period,
+    )
+    scores: dict[str, float | None] = {}
+    atrs: dict[str, float] = {}
+    for asset in universe:
+        df = panel.get(asset)
+        if df is None:
+            scores[asset] = None
+            continue
+        score, atr = _score_one_asset(df, now_utc, params)
+        scores[asset] = score
+        atrs[asset] = atr
+    new_basket = set(select_top_k(scores, K))
+
+    report.basket_before = sorted(current_basket)
+    report.basket_after = sorted(new_basket)
+
+    # ---- 7. Transitions ----
+    closed_set = current_basket - new_basket
+    opened_set = new_basket - current_basket
+    report.closed_assets = sorted(closed_set)
+    report.opened_assets = sorted(opened_set)
+
+    if not closed_set and not opened_set and current_basket == new_basket:
+        # No-op rebalance — basket unchanged. Journal the cadence anchor
+        # so the next cycle's "not_due" gate updates correctly, but skip
+        # MT5 calls entirely.
+        with journal_session_factory() as s:
+            insert_rebalance_transition(
+                s, strategy=strategy, timestamp_utc=now_utc,
+                basket_before=sorted(current_basket),
+                basket_after=sorted(new_basket),
+                closed_assets=[], opened_assets=[],
+                capital_at_rebalance_usd=capital,
+                risk_per_trade_pct=adaptive_risk_per_trade_pct(
+                    current_capital_usd=capital,
+                    capital_floor_for_full_risk_usd=float(
+                        getattr(settings, "ROTATION_CAPITAL_FLOOR_FOR_FULL_RISK_USD", 4950.0)
+                    ),
+                    risk_full_pct=float(
+                        getattr(settings, "ROTATION_RISK_PER_TRADE_FULL_PCT", 0.01)
+                    ),
+                    risk_reduced_pct=float(
+                        getattr(settings, "ROTATION_RISK_PER_TRADE_REDUCED_PCT", 0.005)
+                    ),
+                ),
+                notes="no-op rebalance (basket unchanged)",
+            )
+        report.fired = False
+        report.skipped_reason = "basket_unchanged"
+        logger.info(
+            "rotation cycle: basket unchanged (%s) — journalled as no-op",
+            sorted(current_basket),
+        )
+        return report
+
+    # ---- 8. Adaptive risk + per-asset sizing ----
+    risk_pct = adaptive_risk_per_trade_pct(
+        current_capital_usd=capital,
+        capital_floor_for_full_risk_usd=float(
+            getattr(settings, "ROTATION_CAPITAL_FLOOR_FOR_FULL_RISK_USD", 4950.0)
+        ),
+        risk_full_pct=float(getattr(settings, "ROTATION_RISK_PER_TRADE_FULL_PCT", 0.01)),
+        risk_reduced_pct=float(getattr(settings, "ROTATION_RISK_PER_TRADE_REDUCED_PCT", 0.005)),
+    )
+    risk_usd = capital * risk_pct
+    report.risk_pct = risk_pct
+
+    closes: list[RebalanceClose] = []
+    for sym in sorted(closed_set):
+        row = next((r for r in open_rows if r.symbol == sym), None)
+        if row is None:
+            logger.warning(
+                "rotation cycle: asset %s in close-set but no open row in journal",
+                sym,
+            )
+            continue
+        closes.append(RebalanceClose(
+            symbol=sym, ticket=int(row.mt5_ticket),
+            entry_price=float(row.entry_price),
+            atr_at_entry=float(row.atr_at_entry),
+            risk_usd=float(row.risk_usd),
+        ))
+
+    opens: list[RebalanceOpen] = []
+    for sym in sorted(opened_set):
+        atr = atrs.get(sym, float("nan"))
+        if not (atr > 0):
+            logger.warning(
+                "rotation cycle: asset %s has invalid ATR (%s) — skipping open",
+                sym, atr,
+            )
+            continue
+        try:
+            sym_info = mt5_client.get_symbol_info(sym)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "rotation cycle: get_symbol_info(%s) failed — skipping open", sym
+            )
+            continue
+        try:
+            volume = compute_rotation_volume(
+                risk_usd=risk_usd, atr_at_entry=atr, symbol_info=sym_info,
+            )
+        except ValueError:
+            logger.exception(
+                "rotation cycle: compute_rotation_volume(%s) failed — skipping open",
+                sym,
+            )
+            continue
+        opens.append(RebalanceOpen(
+            symbol=sym, direction="long", volume=volume,
+            atr_at_entry=atr, risk_usd=risk_usd,
+        ))
+
+    # ---- 9. Anchor rebalance transition row ----
+    with journal_session_factory() as s:
+        rebal_uid = insert_rebalance_transition(
+            s, strategy=strategy, timestamp_utc=now_utc,
+            basket_before=sorted(current_basket),
+            basket_after=sorted(new_basket),
+            closed_assets=sorted(closed_set),
+            opened_assets=sorted(opened_set),
+            capital_at_rebalance_usd=capital,
+            risk_per_trade_pct=risk_pct,
+            notes=("dry-run" if dry_run else None),
+        )
+
+    # ---- 10. Notify "scheduled" ----
+    _run_async(notifier.send_text(
+        format_rebalance_scheduled_message(timestamp_utc=now_utc, strategy=strategy)
+    ))
+
+    # ---- 11. Execute and notify "executed" ----
+    try:
+        result = execute_rebalance_transitions(
+            closes=closes, opens=opens,
+            mt5_client=mt5_client,
+            journal_session_factory=journal_session_factory,
+            settings=settings,
+            now_utc=now_utc,
+            strategy=strategy,
+            rebalance_uid=rebal_uid,
+            dry_run=dry_run,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("rotation cycle: execute_rebalance_transitions raised")
+        _run_async(notifier.send_error(
+            format_rebalance_error_message(strategy=strategy, error=repr(exc))
+        ))
+        report.skipped_reason = "execute_exception"
+        return report
+
+    report.fired = True
+    report.closes_succeeded = result.n_closed_ok
+    report.closes_failed = result.n_closed_failed
+    report.opens_succeeded = result.n_opened_ok
+    report.opens_failed = result.n_opened_failed
+
+    _run_async(notifier.send_text(
+        format_rebalance_executed_message(
+            timestamp_utc=now_utc, strategy=strategy,
+            closed_assets=sorted(closed_set),
+            opened_assets=sorted(opened_set),
+            basket_after=sorted(new_basket),
+            capital_usd=capital, risk_pct=risk_pct,
+        )
+    ))
+    logger.info(
+        "rotation cycle fired: closed=%s opened=%s (closes %d/%d ok, opens %d/%d ok)",
+        sorted(closed_set), sorted(opened_set),
+        result.n_closed_ok, result.n_closed_ok + result.n_closed_failed,
+        result.n_opened_ok, result.n_opened_ok + result.n_opened_failed,
+    )
+    return report
+
+
