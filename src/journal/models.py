@@ -213,6 +213,113 @@ class OrderRow(Base):
     )
 
 
+class RebalanceTransitionRow(Base):
+    """One row per rebalance fired by the rotation strategy.
+
+    Captures the basket-level decision at a rebalance date: which assets
+    were already held, which were dropped, which were added. The
+    per-asset rotation positions live in :class:`RotationPositionRow`;
+    this table is the rotation-cycle audit trail (what the strategy
+    decided to do, separate from whether each individual order succeeded
+    on MT5).
+
+    ``basket_before`` / ``basket_after`` are JSON-encoded sorted asset
+    lists for stable hashing across SQLite text storage.
+    """
+
+    __tablename__ = "rebalance_transitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rebalance_uid: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    timestamp_utc: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    strategy: Mapped[str] = mapped_column(String, nullable=False)
+
+    basket_before: Mapped[str] = mapped_column(String, nullable=False)
+    basket_after: Mapped[str] = mapped_column(String, nullable=False)
+    closed_assets: Mapped[str] = mapped_column(String, nullable=False)
+    opened_assets: Mapped[str] = mapped_column(String, nullable=False)
+
+    capital_at_rebalance_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    risk_per_trade_pct: Mapped[float] = mapped_column(Float, nullable=False)
+
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    __table_args__ = (
+        Index("ix_rebalance_transitions_timestamp_utc", "timestamp_utc"),
+        Index("ix_rebalance_transitions_strategy", "strategy"),
+    )
+
+
+class RotationPositionRow(Base):
+    """One row per opened rotation position.
+
+    Lifecycle: row inserted on entry (``status='open'``); on the next
+    rebalance that drops the asset, ``status`` flips to ``'closed'``
+    and the exit fields are populated. There is at most one row per
+    (strategy, symbol) with ``status='open'`` at any time — enforced by
+    the partial unique index below.
+    """
+
+    __tablename__ = "rotation_positions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    strategy: Mapped[str] = mapped_column(String, nullable=False)
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    mt5_ticket: Mapped[int] = mapped_column(Integer, unique=True, nullable=False)
+
+    direction: Mapped[str] = mapped_column(String, nullable=False)  # "long" only in v1
+    volume: Mapped[float] = mapped_column(Float, nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    atr_at_entry: Mapped[float] = mapped_column(Float, nullable=False)
+    risk_usd: Mapped[float] = mapped_column(Float, nullable=False)
+
+    entry_timestamp_utc: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    entry_rebalance_uid: Mapped[str] = mapped_column(
+        String, ForeignKey("rebalance_transitions.rebalance_uid", ondelete="SET NULL"), nullable=True
+    )
+
+    status: Mapped[str] = mapped_column(String, nullable=False)  # 'open' | 'closed'
+    exit_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    exit_timestamp_utc: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    exit_rebalance_uid: Mapped[str | None] = mapped_column(
+        String, ForeignKey("rebalance_transitions.rebalance_uid", ondelete="SET NULL"), nullable=True
+    )
+    realized_r: Mapped[float | None] = mapped_column(Float, nullable=True)
+    realized_pnl_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    __table_args__ = (
+        Index("ix_rotation_positions_strategy_symbol", "strategy", "symbol"),
+        Index("ix_rotation_positions_status", "status"),
+        Index("ix_rotation_positions_entry_timestamp", "entry_timestamp_utc"),
+    )
+
+
+class DailyPnlRow(Base):
+    """Aggregate per-UTC-date P&L tracker for the rotation strategy.
+
+    Distinct from :class:`DailyStateRow` (which is TJR-shaped: per-pair
+    biases, daily-loss in dollar terms for the per-trade hard stops).
+    The rotation strategy needs an account-level snapshot keyed by
+    UTC date so the adaptive-risk schedule can read "what was the
+    capital at the start of today, and what's the running daily P&L".
+
+    ``opening_balance_usd`` is captured once at the day's first
+    update; ``current_balance_usd`` and ``daily_pnl_usd`` are refreshed
+    by every cycle that touches the day.
+    """
+
+    __tablename__ = "rotation_daily_pnl"
+
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    opening_balance_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    current_balance_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    daily_pnl_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    daily_loss_limit_remaining_usd: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class SpreadAnomalyRow(Base):
     """One row per spread anomaly observed at place_order time (Sprint 7).
 

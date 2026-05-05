@@ -22,10 +22,13 @@ from sqlalchemy.orm import Session
 
 from src.detection.setup import Setup
 from src.journal.models import (
+    DailyPnlRow,
     DailyStateRow,
     DecisionRow,
     OrderRow,
     OutcomeRow,
+    RebalanceTransitionRow,
+    RotationPositionRow,
     SetupRow,
     SpreadAnomalyRow,
 )
@@ -447,3 +450,197 @@ def is_auto_trading_disabled(session: Session, *, day: date) -> bool:
     if row is None:
         return False
     return bool(row.auto_trading_disabled)
+
+
+# ---------------------------------------------------------------------------
+# Rotation strategy — rebalance transitions, open positions, daily P&L
+# ---------------------------------------------------------------------------
+
+
+def rebalance_uid_for(strategy: str, timestamp_utc: datetime) -> str:
+    """Stable identity for a rebalance: ``"{strategy}_{ts.isoformat()}"``."""
+    return f"{strategy}_{timestamp_utc.isoformat()}"
+
+
+def insert_rebalance_transition(
+    session: Session,
+    *,
+    strategy: str,
+    timestamp_utc: datetime,
+    basket_before: list[str],
+    basket_after: list[str],
+    closed_assets: list[str],
+    opened_assets: list[str],
+    capital_at_rebalance_usd: float,
+    risk_per_trade_pct: float,
+    notes: str | None = None,
+) -> str:
+    """Persist a rebalance row. Idempotent on the (strategy, timestamp_utc) key.
+
+    Returns the ``rebalance_uid`` so the caller can attach
+    :class:`RotationPositionRow` rows to it via the FK.
+    """
+    uid = rebalance_uid_for(strategy, timestamp_utc)
+    existing = session.execute(
+        select(RebalanceTransitionRow).where(RebalanceTransitionRow.rebalance_uid == uid)
+    ).scalar_one_or_none()
+    if existing is not None:
+        return uid
+    row = RebalanceTransitionRow(
+        rebalance_uid=uid,
+        timestamp_utc=timestamp_utc,
+        strategy=strategy,
+        basket_before=json.dumps(sorted(basket_before)),
+        basket_after=json.dumps(sorted(basket_after)),
+        closed_assets=json.dumps(sorted(closed_assets)),
+        opened_assets=json.dumps(sorted(opened_assets)),
+        capital_at_rebalance_usd=float(capital_at_rebalance_usd),
+        risk_per_trade_pct=float(risk_per_trade_pct),
+        notes=notes,
+    )
+    session.add(row)
+    session.flush()
+    return uid
+
+
+def insert_rotation_position(
+    session: Session,
+    *,
+    strategy: str,
+    symbol: str,
+    mt5_ticket: int,
+    direction: str,
+    volume: float,
+    entry_price: float,
+    atr_at_entry: float,
+    risk_usd: float,
+    entry_timestamp_utc: datetime,
+    entry_rebalance_uid: str | None,
+) -> RotationPositionRow:
+    """Insert a new ``status='open'`` rotation position row."""
+    row = RotationPositionRow(
+        strategy=strategy,
+        symbol=symbol,
+        mt5_ticket=int(mt5_ticket),
+        direction=direction,
+        volume=float(volume),
+        entry_price=float(entry_price),
+        atr_at_entry=float(atr_at_entry),
+        risk_usd=float(risk_usd),
+        entry_timestamp_utc=entry_timestamp_utc,
+        entry_rebalance_uid=entry_rebalance_uid,
+        status="open",
+    )
+    session.add(row)
+    session.flush()
+    return row
+
+
+def get_open_rotation_positions(
+    session: Session, *, strategy: str
+) -> list[RotationPositionRow]:
+    """Return every ``status='open'`` rotation position for ``strategy``."""
+    stmt = (
+        select(RotationPositionRow)
+        .where(RotationPositionRow.strategy == strategy)
+        .where(RotationPositionRow.status == "open")
+        .order_by(RotationPositionRow.entry_timestamp_utc)
+    )
+    return list(session.execute(stmt).scalars())
+
+
+def get_open_rotation_position(
+    session: Session, *, strategy: str, symbol: str
+) -> RotationPositionRow | None:
+    """Return the single open rotation position for (strategy, symbol), or None."""
+    stmt = (
+        select(RotationPositionRow)
+        .where(RotationPositionRow.strategy == strategy)
+        .where(RotationPositionRow.symbol == symbol)
+        .where(RotationPositionRow.status == "open")
+    )
+    return session.execute(stmt).scalar_one_or_none()
+
+
+def close_rotation_position(
+    session: Session,
+    *,
+    mt5_ticket: int,
+    exit_price: float,
+    exit_timestamp_utc: datetime,
+    exit_rebalance_uid: str | None,
+    realized_r: float,
+    realized_pnl_usd: float,
+) -> RotationPositionRow | None:
+    """Flip a rotation position from ``'open'`` to ``'closed'``.
+
+    Returns the updated row, or ``None`` if no open row matched the
+    ticket. Missing-row case is logged-only — production may have
+    closed the MT5 position outside the journal (manual intervention)
+    and the rotation cycle should still proceed.
+    """
+    stmt = select(RotationPositionRow).where(
+        RotationPositionRow.mt5_ticket == int(mt5_ticket)
+    )
+    row = session.execute(stmt).scalar_one_or_none()
+    if row is None:
+        logger.warning(
+            "close_rotation_position: ticket=%d not found in journal", mt5_ticket
+        )
+        return None
+    if row.status != "open":
+        logger.warning(
+            "close_rotation_position: ticket=%d already in status=%r",
+            mt5_ticket,
+            row.status,
+        )
+        return row
+    row.status = "closed"
+    row.exit_price = float(exit_price)
+    row.exit_timestamp_utc = exit_timestamp_utc
+    row.exit_rebalance_uid = exit_rebalance_uid
+    row.realized_r = float(realized_r)
+    row.realized_pnl_usd = float(realized_pnl_usd)
+    session.flush()
+    return row
+
+
+def upsert_rotation_daily_pnl(
+    session: Session,
+    *,
+    day: date,
+    current_balance_usd: float,
+    daily_loss_limit_remaining_usd: float,
+    opening_balance_usd: float | None = None,
+) -> DailyPnlRow:
+    """Insert the day's row if absent (capturing ``opening_balance``); otherwise
+    refresh ``current_balance``, ``daily_pnl``, and the remaining-limit field.
+
+    ``opening_balance_usd`` is read on first call of the day from the live
+    MT5 account; subsequent calls leave it untouched. ``daily_pnl_usd`` is
+    derived as ``current_balance - opening_balance``.
+    """
+    row = session.get(DailyPnlRow, day)
+    if row is None:
+        if opening_balance_usd is None:
+            opening_balance_usd = current_balance_usd
+        row = DailyPnlRow(
+            date=day,
+            opening_balance_usd=float(opening_balance_usd),
+            current_balance_usd=float(current_balance_usd),
+            daily_pnl_usd=float(current_balance_usd) - float(opening_balance_usd),
+            daily_loss_limit_remaining_usd=float(daily_loss_limit_remaining_usd),
+            updated_at=_now_utc(),
+        )
+        session.add(row)
+    else:
+        row.current_balance_usd = float(current_balance_usd)
+        row.daily_pnl_usd = float(current_balance_usd) - row.opening_balance_usd
+        row.daily_loss_limit_remaining_usd = float(daily_loss_limit_remaining_usd)
+        row.updated_at = _now_utc()
+    session.flush()
+    return row
+
+
+def get_rotation_daily_pnl(session: Session, *, day: date) -> DailyPnlRow | None:
+    return session.get(DailyPnlRow, day)

@@ -231,3 +231,176 @@ def test_upsert_daily_state_unknown_field_raises(engine):
     with pytest.raises(AttributeError):
         with session_scope(engine) as s:
             upsert_daily_state(s, date(2026, 1, 2), nonexistent=True)
+
+
+# -----------------------------------------------------------------------------
+# Rotation strategy — rebalance_transitions / rotation_positions / daily_pnl
+# -----------------------------------------------------------------------------
+
+
+def test_rebalance_uid_for_is_stable():
+    from src.journal.repository import rebalance_uid_for
+
+    ts = datetime(2026, 5, 5, 21, 0, tzinfo=UTC)
+    uid = rebalance_uid_for("trend_rotation_d1", ts)
+    assert uid == f"trend_rotation_d1_{ts.isoformat()}"
+    # Same input -> same output.
+    assert rebalance_uid_for("trend_rotation_d1", ts) == uid
+
+
+def test_insert_rebalance_transition_persists_and_dedupes(engine):
+    from src.journal.repository import insert_rebalance_transition
+
+    ts = datetime(2026, 5, 5, 21, 0, tzinfo=UTC)
+    with session_scope(engine) as s:
+        uid1 = insert_rebalance_transition(
+            s,
+            strategy="trend_rotation_d1",
+            timestamp_utc=ts,
+            basket_before=["NDX100", "XAUUSD"],
+            basket_after=["XAUUSD", "BTCUSD", "GER30"],
+            closed_assets=["NDX100"],
+            opened_assets=["BTCUSD", "GER30"],
+            capital_at_rebalance_usd=4850.0,
+            risk_per_trade_pct=0.005,
+        )
+    with session_scope(engine) as s:
+        # Re-insert same key -> dedup.
+        uid2 = insert_rebalance_transition(
+            s,
+            strategy="trend_rotation_d1",
+            timestamp_utc=ts,
+            basket_before=["NDX100", "XAUUSD"],
+            basket_after=["XAUUSD", "BTCUSD", "GER30"],
+            closed_assets=["NDX100"],
+            opened_assets=["BTCUSD", "GER30"],
+            capital_at_rebalance_usd=4850.0,
+            risk_per_trade_pct=0.005,
+        )
+    assert uid1 == uid2
+
+    # Verify the row content.
+    from src.journal.models import RebalanceTransitionRow
+    from sqlalchemy import select as _select
+
+    with session_scope(engine) as s:
+        rows = list(s.execute(_select(RebalanceTransitionRow)).scalars())
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.strategy == "trend_rotation_d1"
+        assert row.capital_at_rebalance_usd == pytest.approx(4850.0)
+        assert row.risk_per_trade_pct == pytest.approx(0.005)
+        # JSON-encoded sorted lists.
+        assert json.loads(row.basket_before) == ["NDX100", "XAUUSD"]
+        assert json.loads(row.basket_after) == ["BTCUSD", "GER30", "XAUUSD"]
+        assert json.loads(row.closed_assets) == ["NDX100"]
+        assert json.loads(row.opened_assets) == ["BTCUSD", "GER30"]
+
+
+def test_insert_and_close_rotation_position(engine):
+    from src.journal.repository import (
+        close_rotation_position,
+        get_open_rotation_position,
+        get_open_rotation_positions,
+        insert_rebalance_transition,
+        insert_rotation_position,
+    )
+
+    ts_open = datetime(2026, 5, 5, 21, 0, tzinfo=UTC)
+    ts_close = datetime(2026, 5, 10, 21, 0, tzinfo=UTC)
+    with session_scope(engine) as s:
+        rebal_uid = insert_rebalance_transition(
+            s, strategy="trend_rotation_d1", timestamp_utc=ts_open,
+            basket_before=[], basket_after=["XAUUSD"],
+            closed_assets=[], opened_assets=["XAUUSD"],
+            capital_at_rebalance_usd=4850.0, risk_per_trade_pct=0.005,
+        )
+        insert_rotation_position(
+            s, strategy="trend_rotation_d1", symbol="XAUUSD",
+            mt5_ticket=111111, direction="long", volume=0.05,
+            entry_price=2400.5, atr_at_entry=12.5, risk_usd=24.25,
+            entry_timestamp_utc=ts_open, entry_rebalance_uid=rebal_uid,
+        )
+
+    with session_scope(engine) as s:
+        # Single open row visible.
+        opens = get_open_rotation_positions(s, strategy="trend_rotation_d1")
+        assert len(opens) == 1
+        assert opens[0].symbol == "XAUUSD"
+        assert opens[0].mt5_ticket == 111111
+
+        # Per-symbol lookup.
+        single = get_open_rotation_position(
+            s, strategy="trend_rotation_d1", symbol="XAUUSD"
+        )
+        assert single is not None
+        assert single.mt5_ticket == 111111
+
+    with session_scope(engine) as s:
+        rebal_uid_close = insert_rebalance_transition(
+            s, strategy="trend_rotation_d1", timestamp_utc=ts_close,
+            basket_before=["XAUUSD"], basket_after=[],
+            closed_assets=["XAUUSD"], opened_assets=[],
+            capital_at_rebalance_usd=4900.0, risk_per_trade_pct=0.005,
+        )
+        row = close_rotation_position(
+            s, mt5_ticket=111111,
+            exit_price=2412.5, exit_timestamp_utc=ts_close,
+            exit_rebalance_uid=rebal_uid_close,
+            realized_r=0.96, realized_pnl_usd=23.28,
+        )
+        assert row is not None
+        assert row.status == "closed"
+        assert row.realized_r == pytest.approx(0.96)
+
+    with session_scope(engine) as s:
+        opens = get_open_rotation_positions(s, strategy="trend_rotation_d1")
+        assert opens == []
+
+
+def test_close_rotation_position_unknown_ticket_returns_none(engine):
+    from src.journal.repository import close_rotation_position
+
+    with session_scope(engine) as s:
+        row = close_rotation_position(
+            s, mt5_ticket=999999,
+            exit_price=0.0, exit_timestamp_utc=datetime.now(tz=UTC),
+            exit_rebalance_uid=None, realized_r=0.0, realized_pnl_usd=0.0,
+        )
+        assert row is None
+
+
+def test_upsert_rotation_daily_pnl_insert_then_update(engine):
+    from src.journal.repository import (
+        get_rotation_daily_pnl,
+        upsert_rotation_daily_pnl,
+    )
+
+    today = date(2026, 5, 5)
+    with session_scope(engine) as s:
+        upsert_rotation_daily_pnl(
+            s, day=today,
+            current_balance_usd=4850.0,
+            daily_loss_limit_remaining_usd=200.0,
+            opening_balance_usd=4850.0,
+        )
+    with session_scope(engine) as s:
+        row = get_rotation_daily_pnl(s, day=today)
+        assert row is not None
+        assert row.opening_balance_usd == pytest.approx(4850.0)
+        assert row.current_balance_usd == pytest.approx(4850.0)
+        assert row.daily_pnl_usd == pytest.approx(0.0)
+
+    with session_scope(engine) as s:
+        upsert_rotation_daily_pnl(
+            s, day=today,
+            current_balance_usd=4820.0,
+            daily_loss_limit_remaining_usd=170.0,
+        )
+    with session_scope(engine) as s:
+        row = get_rotation_daily_pnl(s, day=today)
+        # Opening balance preserved across upsert.
+        assert row.opening_balance_usd == pytest.approx(4850.0)
+        assert row.current_balance_usd == pytest.approx(4820.0)
+        assert row.daily_pnl_usd == pytest.approx(-30.0)
+        assert row.daily_loss_limit_remaining_usd == pytest.approx(170.0)
